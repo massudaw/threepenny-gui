@@ -49,6 +49,9 @@ serve config init = httpComm config $ eventLoop $ \w -> do
     JavaScript
 ------------------------------------------------------------------------------}
 -- | Run a JavaScript function, but do not wait for a result.
+--
+-- NOTE: The JavaScript function is subject to buffering,
+-- and may not be run immediately. See 'setCallBufferMode'.
 runFunction :: Window -> JSFunction () -> IO ()
 runFunction w f = bufferRunEval w =<< toCode f
 

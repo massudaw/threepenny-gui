@@ -295,6 +295,9 @@ liftIOLater x = UI $ Monad.tell [x]
 -- | Run the given JavaScript function and carry on. Doesn't block.
 --
 -- The client window uses JavaScript's @eval()@ function to run the code.
+--
+-- NOTE: The JavaScript code is subject to buffering,
+-- and may not be run immediately. See 'setCallBufferMode'.
 runFunction :: JSFunction () -> UI ()
 runFunction fun = liftJSWindow $ \w -> JS.runFunction w fun
 
