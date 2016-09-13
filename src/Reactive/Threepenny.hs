@@ -5,11 +5,12 @@ module Reactive.Threepenny (
 
     -- * Types
     -- $intro
-    Event, Behavior,
+    Event, Behavior,Dynamic,
+    runDynamic,
 
     -- * IO
     -- | Functions to connect events to the outside world.
-    Handler, newEvent, register,
+    Handler, newEvent,newEvent', register,onEventIO,
     currentValue,
 
     -- * Core Combinators
@@ -30,7 +31,7 @@ module Reactive.Threepenny (
     unions, concatenate,
     -- ** Accumulation
     -- $accumulation
-    accumB, mapAccum,
+    accumB,accumBDyn, mapAccum,
 
     -- * Additional Notes
     -- $recursion
@@ -47,15 +48,19 @@ module Reactive.Threepenny (
 import Control.Applicative
 import Control.Monad (void)
 import Control.Monad.IO.Class
+import Control.Monad.Trans.Class
 import Data.IORef
 import qualified Data.Map as Map
 
 import           Reactive.Threepenny.Memo       as Memo
 import qualified Reactive.Threepenny.PulseLatch as Prim
+import qualified Control.Monad.Trans.Writer as Writer
 
 type Pulse = Prim.Pulse
 type Latch = Prim.Latch
 type Map   = Map.Map
+type Dynamic  = Writer.WriterT [IO ()] IO
+runDynamic = Writer.runWriterT
 
 {-----------------------------------------------------------------------------
     Types
@@ -95,6 +100,12 @@ newEvent = do
     (p, fire) <- Prim.newPulse
     return (E $ fromPure p, fire)
 
+newEvent' :: Event b -> IO (Event a, Handler a)
+newEvent' e = do
+    pre <- at (unE e)
+    (p, fire) <- Prim.newPulse
+    return (E $ fromPure (p `Prim.dependOn` pre ), fire)
+
 
 -- | Create a series of events with delayed initialization.
 --
@@ -126,10 +137,13 @@ newEventsNamed init = do
 -- > do unregisterMyHandler <- register event myHandler
 --
 -- FIXME: Unregistering event handlers does not work yet.
-register :: Event a -> Handler a -> IO (IO ())
+register :: Event a -> Handler a -> Dynamic ()
 register e h = do
-    p <- at (unE e)     -- evaluate the memoized action
-    Prim.addHandler p h
+    p <- liftIO$ at (unE e)     -- evaluate the memoized action
+    r <- liftIO $ Prim.addHandler p h
+    Writer.tell [r]
+    return ()
+
 
 -- | Register an event 'Handler' for a 'Behavior'.
 -- All registered handlers will be called whenever the behavior changes.
@@ -137,8 +151,8 @@ register e h = do
 -- However, note that this is only an approximation,
 -- as behaviors may change continuously.
 -- Consequently, handlers should be idempotent.
-onChange :: Behavior a -> Handler a -> IO ()
-onChange (B l e) h = void $ do
+onChange :: Behavior a -> Handler a -> Dynamic ()
+onChange (B l e) h = do
     -- This works because latches are updated before the handlers are being called.
     register e (\_ -> h =<< Prim.readLatch l)
 
@@ -207,9 +221,17 @@ b <@ e = (const <$> b) <@> e
 -- the events occur. This allows for recursive definitions.
 accumB :: MonadIO m => a -> Event (a -> a) -> m (Behavior a)
 accumB a e = liftIO $ do
-    (l1,p1) <- Prim.accumL a =<< at (unE e)
+    (l1,p1,_) <- Prim.accumL a =<< at (unE e)
     p2      <- Prim.mapP (const ()) p1
     return $ B l1 (E $ fromPure p2)
+
+accumBDyn :: a -> Event (a -> a) -> Dynamic  (Behavior a)
+accumBDyn a e = do
+  (l1,p1,unH) <- liftIO$ Prim.accumL a =<< at (unE e)
+  Writer.tell [unH]
+  p2      <- liftIO$ Prim.mapP (const ()) p1
+  return $ B l1 (E $ fromPure p2)
+
 
 
 -- | Construct a time-varying function from an initial value and
@@ -234,7 +256,7 @@ stepper a e = accumB a (const <$> e)
 -- there is no \"delay\" like in the case of 'accumB'.
 accumE :: MonadIO m =>  a -> Event (a -> a) -> m (Event a)
 accumE a e = liftIO $ do
-    p <- fmap snd . Prim.accumL a =<< at (unE e)
+    (_,p,_) <-  Prim.accumL a =<< at (unE e)
     return $ E $ fromPure p
 
 instance Functor Behavior where
@@ -323,6 +345,11 @@ unions = foldr (unionWith (++)) never . map (fmap (:[]))
 concatenate :: [a -> a] -> (a -> a)
 concatenate = foldr (.) id
 
+onEventIO :: Event a -> (a -> IO void) -> Dynamic ()
+onEventIO e h = do
+      register e (void . h)
+
+
 {- $accumulation
 
 Note: All accumulation functions are strict in the accumulated value!
@@ -374,17 +401,17 @@ pair (T bx ex) (T by ey) = T b e
 {-----------------------------------------------------------------------------
     Test
 ------------------------------------------------------------------------------}
-test :: IO (Int -> IO ())
+test :: Dynamic (Int -> IO ())
 test = do
-    (e1,fire) <- newEvent
-    e2 <- accumE 0 $ (+) <$> e1
-    _  <- register e2 print
+  (e1,fire) <- lift newEvent
+  e2 <- accumE 0 $ (+) <$> e1
+  _  <- register e2 print
 
-    return fire
+  return fire
 
-test_recursion1 :: IO (IO ())
+test_recursion1 :: Dynamic (IO ())
 test_recursion1 = mdo
-    (e1, fire) <- newEvent
+    (e1, fire) <- lift newEvent
     let e2 :: Event Int
         e2 = apply (const <$> b) e1
     b  <- accumB 0 $ (+1) <$ e2

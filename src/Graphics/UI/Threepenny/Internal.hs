@@ -8,12 +8,12 @@ module Graphics.UI.Threepenny.Internal (
     Window, disconnect,
     startGUI,
 
-    UI, runUI, liftIOLater, askWindow,
+    UI, runUI, liftIOLater, askWindow,ui,
 
     FFI, FromJS, ToJS, JSFunction, JSObject, ffi,
     runFunction, callFunction, ffiExport, debug, timestamp,
 
-    Element, fromJSObject, getWindow,
+    Element(..), fromJSObject, getWindow,
     mkElementNamespace, mkElement, delete, appendChild, clearChildren,
 
     EventData, domEvent, unsafeFromJSON,
@@ -21,8 +21,10 @@ module Graphics.UI.Threepenny.Internal (
 
 import           Control.Applicative                   (Applicative)
 import           Control.Monad
+import qualified Control.Monad.Trans.Writer as Writer
 import           Control.Monad.Fix
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
 import qualified Control.Monad.Trans.RWS.Lazy as Monad
 import           Data.Dynamic                          (Typeable)
 
@@ -31,6 +33,7 @@ import qualified Foreign.JavaScript      as JS
 import qualified Foreign.RemotePtr       as Foreign
 
 import qualified Reactive.Threepenny     as E
+import Reactive.Threepenny    (Dynamic)
 
 import Foreign.JavaScript hiding (runFunction, callFunction, debug, timestamp, Window)
 
@@ -68,7 +71,8 @@ startGUI config init = JS.serve config $ \w -> do
             }
 
     -- run initialization
-    runUI window $ init window
+    Writer.execWriterT $ runUI window $ init window
+    return ()
 
 -- | Event that occurs whenever the client has disconnected,
 -- be it by closing the browser window or by exception.
@@ -77,6 +81,8 @@ startGUI config init = JS.serve config $ \w -> do
 -- can no longer be manipulated.
 disconnect :: Window -> E.Event ()
 disconnect = eDisconnect
+
+
 
 {-----------------------------------------------------------------------------
     Elements
@@ -122,7 +128,7 @@ fromJSObject0 :: JS.JSObject -> Window -> IO Element
 fromJSObject0 el window = do
     events   <- getEvents   el window
     children <- getChildren el window
-    return $ Element el events children window
+    return $ Element el events children  window
 
 -- | Convert JavaScript object into an element.
 --
@@ -170,8 +176,10 @@ type EventData = JSON.Value
 
 -- | Convert event data to a Haskell value.
 -- Throws an exception when the data cannot be converted.
-unsafeFromJSON :: JSON.FromJSON a => EventData -> a
-unsafeFromJSON x = let JSON.Success y = JSON.fromJSON x in y
+unsafeFromJSON :: Show a => JSON.FromJSON a => EventData -> a
+unsafeFromJSON x = case  JSON.fromJSON x  of
+                JSON.Success y -> y
+                e -> error ( show (x,e))
 
 -- | Obtain DOM event for a given element.
 domEvent
@@ -246,8 +254,9 @@ in which JavaScript function calls are executed.
 * Recursion for functional reactive programming.
 
 -}
-newtype UI a = UI { unUI :: Monad.RWST Window [IO ()] () IO a }
+newtype UI a = UI { unUI :: Monad.RWST Window [Dynamic ()] () Dynamic a }
     deriving (Typeable)
+
 
 liftJSWindow :: (JS.Window -> IO a) -> UI a
 liftJSWindow f = askWindow >>= liftIO . f . jsWindow
@@ -271,19 +280,24 @@ instance MonadFix UI where
 
 -- | Execute an 'UI' action in a particular browser window.
 -- Also runs all scheduled 'IO' actions.
-runUI :: Window -> UI a -> IO a
+runUI :: Window -> UI a -> Dynamic a
 runUI window m = do
-    (a, _, actions) <- Monad.runRWST (unUI m) window ()
-    sequence_ actions
-    return a
+  (a,_,actions) <- Monad.runRWST (unUI m) window ()
+  sequence_ actions
+  return a
+
+ui f = UI $ lift f
 
 -- | Retrieve current 'Window' context in the 'UI' monad.
 askWindow :: UI Window
 askWindow = UI Monad.ask
 
 -- | Schedule an 'IO' action to be run later.
-liftIOLater :: IO () -> UI ()
+liftIOLater :: Dynamic () -> UI ()
 liftIOLater x = UI $ Monad.tell [x]
+
+registerFin :: IO () -> Dynamic ()
+registerFin x = Writer.tell [x]
 
 {-----------------------------------------------------------------------------
     FFI

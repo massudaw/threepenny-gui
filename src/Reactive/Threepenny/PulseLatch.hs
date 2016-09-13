@@ -1,8 +1,8 @@
 {-# LANGUAGE RecordWildCards, RecursiveDo #-}
 module Reactive.Threepenny.PulseLatch (
     Pulse, newPulse, addHandler,
-    neverP, mapP, filterJustP, unionWithP, unsafeMapIOP,
-    
+    neverP, mapP, filterJustP, unionWithP, unsafeMapIOP,dependOn,
+
     Latch,
     pureL, mapL, applyL, accumL, applyP,
     readLatch,
@@ -66,23 +66,23 @@ newPulse :: Build (Pulse a, a -> IO ())
 newPulse = do
     key         <- Vault.newKey
     handlersRef <- newIORef Map.empty      -- map of handlers
-    
+
     let
         -- add handler to map
         addHandlerP :: ((Unique, Priority), Handler) -> Build (IO ())
         addHandlerP (uid,m) = do
             modifyIORef' handlersRef (Map.insert uid m)
             return $ modifyIORef' handlersRef (Map.delete uid)
-        
+
         -- evaluate all handlers attached to this input pulse
         fireP a = do
             let pulses = Vault.insert key (Just a) $ Vault.empty
             handlers <- readIORef handlersRef
-            (ms, _)  <- runEvalP pulses $ sequence $ 
+            (ms, _)  <- runEvalP pulses $ sequence $
                    [m | ((_,DoLatch),m) <- Map.toList handlers]
-                ++ [m | ((_,DoIO   ),m) <- Map.toList handlers]  
+                ++ [m | ((_,DoIO   ),m) <- Map.toList handlers]
             sequence_ ms
-        
+
         evalP = join . Vault.lookup key <$> Monad.get
 
     return (Pulse {..}, fireP)
@@ -148,7 +148,7 @@ applyP l p = (`dependOn` p) <$> cacheEval eval
         return $ f <$> a
 
 -- | Accumulate values in a latch.
-accumL :: a -> Pulse (a -> a) -> Build (Latch a, Pulse a)
+accumL :: a -> Pulse (a -> a) -> Build (Latch a, Pulse a,IO ())
 accumL a p1 = do
     -- IORef to hold the current latch value
     latch <- newIORef a
@@ -161,9 +161,9 @@ accumL a p1 = do
     -- register handler to update latch
     uid <- newUnique
     let handler = whenPulse p2 $ (writeIORef latch $!)
-    void $ addHandlerP p2 ((uid, DoLatch), handler)
-    
-    return (l1,p2)
+    unH <- addHandlerP p2 ((uid, DoLatch), handler)
+
+    return (l1,p2,unH)
 
 -- | Latch whose value stays constant.
 pureL :: a -> Latch a
@@ -173,7 +173,7 @@ pureL a = Latch { readL = return a }
 --
 -- Evaluated only when needed, result is not cached.
 mapL :: (a -> b) -> Latch a -> Latch b
-mapL f l = Latch { readL = f <$> readL l } 
+mapL f l = Latch { readL = f <$> readL l }
 
 -- | Apply two current latch values
 --
@@ -188,7 +188,7 @@ test :: IO (Int -> IO ())
 test = do
     (p1, fire) <- newPulse
     p2     <- mapP (+) p1
-    (l1,_) <- accumL 0 p2
+    (l1,_,_) <- accumL 0 p2
     let l2 =  mapL const l1
     p3     <- applyP l2 p1
     void $ addHandler p3 print
@@ -199,7 +199,7 @@ test_recursion1 = mdo
     (p1, fire) <- newPulse
     p2      <- applyP l2 p1
     p3      <- mapP (const (+1)) p2
-    ~(l1,_) <- accumL (0::Int) p3
+    ~(l1,_,_) <- accumL (0::Int) p3
     let l2  =  mapL const l1
     void $ addHandler p2 print
     return $ fire ()

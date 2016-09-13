@@ -1,10 +1,10 @@
 module Graphics.UI.Threepenny.Events (
     -- * Synopsis
     -- | Events on DOM elements.
-    
+
     -- * Convenience events
     valueChange, selectionChange, checkedChange,
-    
+
     -- * Standard DOM events
     click, mousemove, mousedown, mouseup, hover, leave,
     focus, blur,
@@ -23,7 +23,7 @@ silence = fmap (const ())
 valueChange :: Element -> Event String
 valueChange el = unsafeMapUI el (const $ get value el) (domEvent "keydown" el)
 
-unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))
+unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w ->  fmap fst $ runDynamic $ runUI w (f a))
 
 -- | Event that occurs when the /user/ changes the selection of a @<select>@ element.
 selectionChange :: Element -> Event (Maybe Int)
@@ -61,12 +61,12 @@ readCoordinates json = (x,y)
     where [x,y] = unsafeFromJSON json
 
 -- | Mouse down event.
--- The mouse coordinates are relative to the element. 
+-- The mouse coordinates are relative to the element.
 mousedown :: Element -> Event (Int,Int)
 mousedown = fmap readCoordinates . domEvent "mousedown"
 
 -- | Mouse up event.
--- The mouse coordinates are relative to the element. 
+-- The mouse coordinates are relative to the element.
 mouseup :: Element -> Event (Int,Int)
 mouseup = fmap readCoordinates . domEvent "mouseup"
 

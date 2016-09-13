@@ -19,7 +19,7 @@ module Foreign.JavaScript (
     ToJS(..), FromJS, JSFunction, JSObject,
     FFI, ffi, runFunction, callFunction, NewJSObject, unsafeCreateJSObject,
     IsHandler, exportHandler, onDisconnect,
-    debug, timestamp,
+    debug, timestamp,addFinalizer
     ) where
 
 import qualified Data.Aeson                   as JSON

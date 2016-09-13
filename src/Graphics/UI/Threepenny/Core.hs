@@ -1,21 +1,21 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeSynonymInstances,RankNTypes,FlexibleContexts #-}
 module Graphics.UI.Threepenny.Core (
     -- * Synopsis
     -- | Core functionality of the Threepenny GUI library.
-    
+
     -- * Server
     -- $server
     Config(..), defaultConfig, startGUI,
-    
+
     -- * UI monad
     -- $ui
-    UI, runUI, askWindow, liftIOLater,
+    UI,ui, runUI, askWindow, liftIOLater,
     module Control.Monad.IO.Class,
     module Control.Monad.Fix,
-    
+
     -- * Browser Window
     Window, title,
-    
+
     -- * DOM elements
     -- | Create and manipulate DOM elements.
     Element, getWindow, mkElement, mkElementNamespace, delete,
@@ -23,42 +23,44 @@ module Graphics.UI.Threepenny.Core (
         getHead, getBody,
         (#+), children, text, html, attr, style, value,
     getElementsByTagName, getElementById, getElementsByClassName,
-    
+
     -- * Layout
     -- | Combinators for quickly creating layouts.
     -- They can be adjusted with CSS later on.
     grid, row, column,
-    
+
     -- * Events
     -- | For a list of predefined events, see "Graphics.UI.Threepenny.Events".
-    EventData, domEvent, unsafeFromJSON, disconnect, on, onEvent, onChanges,
+    EventData, domEvent, unsafeFromJSON, disconnect, on, onEvent, onChanges, mapEventFin,mapEventDyn,
     module Reactive.Threepenny,
-    
+
     -- * Attributes
     -- | For a list of predefined attributes, see "Graphics.UI.Threepenny.Attributes".
     (#), (#.),
-    Attr, WriteAttr, ReadAttr, ReadWriteAttr(..),
+    Attr, WriteAttr, ReadAttr, ReadWriteAttr(..),ReadWriteAttrMIO(..),
     set, sink, get, mkReadWriteAttr, mkWriteAttr, mkReadAttr,
     bimapAttr, fromObjectProperty,
-    
+
     -- * Widgets
     Widget(..), element, widget,
-    
+
     -- * JavaScript FFI
     -- | Direct interface to JavaScript in the browser window.
     debug, timestamp,
     ToJS, FFI,
     JSFunction, ffi, runFunction, callFunction,
     ffiExport,
-    
+
     -- * Internal and oddball functions
     fromJQueryProp,
-    
+
     ) where
 
 import Control.Monad          (forM_, forM, void)
 import Control.Monad.Fix
+import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
+import Control.Concurrent (forkIO)
 
 import qualified Data.Aeson                      as JSON
 import qualified Foreign.JavaScript              as JS
@@ -125,7 +127,7 @@ attr name = mkWriteAttr $ \s el ->
 
 -- | Set CSS style of an Element
 style :: WriteAttr Element [(String,String)]
-style = mkWriteAttr $ \xs el -> forM_ xs $ \(name,val) -> 
+style = mkWriteAttr $ \xs el -> forM_ xs $ \(name,val) ->
     runFunction $ ffi "%1.style[%2] = %3" el name val
 
 -- | Value attribute of an element.
@@ -213,7 +215,7 @@ column = grid . map (:[])
 grid    :: [[UI Element]] -> UI Element
 grid mrows = do
         rows0 <- mapM (sequence) mrows
-    
+
         rows  <- forM rows0 $ \row0 -> do
             row <- forM row0 $ \entry ->
                 wrap "table-cell" [entry]
@@ -235,20 +237,36 @@ on :: (element -> Event a) -> element -> (a -> UI void) -> UI ()
 on f x = void . onEvent (f x)
 
 -- | Register an 'UI' action to be executed whenever the 'Event' happens.
--- 
+--
 -- FIXME: Should be unified with 'on'?
-onEvent :: Event a -> (a -> UI void) -> UI (UI ())
+onEvent :: Event a -> (a -> UI void) -> UI ()
 onEvent e h = do
     window <- askWindow
-    unregister <- liftIO $ register e (void . runUI window . h)
-    return (liftIO unregister)
+    ui $ register e (void . runDynamic . runUI window . h)
 
 -- | Execute a 'UI' action whenever a 'Behavior' changes.
 -- Use sparingly, it is recommended that you use 'sink' instead.
 onChanges :: Behavior a -> (a -> UI void) -> UI ()
 onChanges b f = do
     window <- askWindow
-    liftIO $ Reactive.onChange b (void . runUI window . f)
+    ui $ Reactive.onChange b (void . runDynamic . runUI window . f)
+
+mapEventDyn ::(a -> Dynamic b) -> Event a -> Dynamic (Event (b,[IO()]) )
+mapEventDyn f x = do
+    (e,h) <- liftIO $ newEvent' x
+    onEventIO x (\i -> void $ (runDynamic $ f i)  >>= h)
+    return  e
+
+
+
+
+mapEventFin ::MonadIO m =>  (a -> IO b) -> Event a -> m (Event b, [IO ()])
+mapEventFin f x = liftIO $ do
+    (e,h) <- liftIO $ newEvent' x
+    fin <- runDynamic $ onEventIO x (\i -> void $ forkIO $ (f i)  >>= h)
+    return  (e,snd fin)
+
+
 
 {-----------------------------------------------------------------------------
     Attributes
@@ -283,17 +301,20 @@ type ReadAttr x o = ReadWriteAttr x () o
 type WriteAttr x i = ReadWriteAttr x i ()
 
 -- | Generalized attribute with different types for getting and setting.
-data ReadWriteAttr x i o = ReadWriteAttr
-    { get' :: x -> UI o
-    , set' :: i -> x -> UI ()
-    }
 
-instance Functor (ReadWriteAttr x i) where
+type ReadWriteAttr x i o  = ReadWriteAttrMIO UI x i o
+
+data ReadWriteAttrMIO m x i o = ReadWriteAttr
+  { get' :: x -> m o
+  , set' :: i -> x -> m ()
+  }
+
+instance MonadIO m => Functor (ReadWriteAttrMIO m x i) where
     fmap f = bimapAttr id f
 
 -- | Map input and output type of an attribute.
-bimapAttr :: (i' -> i) -> (o -> o')
-          -> ReadWriteAttr x i o -> ReadWriteAttr x i' o'
+bimapAttr :: Functor m => (i' -> i) -> (o -> o')
+          -> ReadWriteAttrMIO m x i o -> ReadWriteAttrMIO m x i' o'
 bimapAttr from to attr = attr
     { get' = fmap to . get' attr
     , set' = \i' -> set' attr (from i')
@@ -301,7 +322,7 @@ bimapAttr from to attr = attr
 
 -- | Set value of an attribute in the 'UI' monad.
 -- Best used in conjunction with '#'.
-set :: ReadWriteAttr x i o -> i -> UI x -> UI x
+set :: Monad m => ReadWriteAttrMIO m x i o -> i -> m x -> m x
 set attr i mx = do { x <- mx; set' attr i x; return x; }
 
 -- | Set the value of an attribute to a 'Behavior', that is a time-varying value.
@@ -315,7 +336,8 @@ sink attr bi mx = do
     liftIOLater $ do
         i <- currentValue bi
         runUI window $ set' attr i x
-        Reactive.onChange bi  $ \i -> runUI window $ set' attr i x  
+        Reactive.onChange bi  $ \i -> void $ runDynamic $ runUI window $ set' attr i x
+        return ()
     return x
 
 -- | Get attribute value.
@@ -324,9 +346,9 @@ get attr = get' attr
 
 -- | Build an attribute from a getter and a setter.
 mkReadWriteAttr
-    :: (x -> UI o)          -- ^ Getter.
-    -> (i -> x -> UI ())    -- ^ Setter.
-    -> ReadWriteAttr x i o
+  :: (x -> m o)          -- ^ Getter.
+    -> (i -> x -> m ())    -- ^ Setter.
+    -> ReadWriteAttrMIO m  x i o
 mkReadWriteAttr get set = ReadWriteAttr { get' = get, set' = set }
 
 -- | Build attribute from a getter.
@@ -348,7 +370,7 @@ fromJQueryProp name from to = mkReadWriteAttr get set
 fromObjectProperty :: (FromJS a, ToJS a, FFI (JSFunction a)) => String -> Attr Element a
 fromObjectProperty name = mkReadWriteAttr get set
     where
-    set v el = runFunction  $ ffi ("%1." ++ name ++ " = %2") el v    
+    set v el = runFunction  $ ffi ("%1." ++ name ++ " = %2") el v
     get   el = callFunction $ ffi ("%1." ++ name) el
 
 {-----------------------------------------------------------------------------

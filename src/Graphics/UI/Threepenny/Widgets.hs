@@ -4,10 +4,10 @@ module Graphics.UI.Threepenny.Widgets (
     -- | Widgets are reusable building blocks for a graphical user interface.
     -- This module collects useful widgets that are designed to work
     -- with functional reactive programming (FRP).
-    -- 
+    --
     -- For more details and information on how to write your own widgets, see the
     -- <https://github.com/HeinrichApfelmus/threepenny-gui/blob/master/doc/design-widgets.md widget design guide>.
-    
+
     -- * Tidings
     Tidings, rumors, facts, tidings,
     -- * Widgets
@@ -50,14 +50,14 @@ entry bValue = do -- single text entry
 
     bEditing <- stepper False $ and <$>
         unions [True <$ UI.focus input, False <$ UI.blur input]
-    
+
     window <- askWindow
-    liftIOLater $ onChange bValue $ \s -> runUI window $ do
+    liftIOLater $ onChange bValue $ \s -> fmap fst $ runDynamic $ runUI window $ do
         editing <- liftIO $ currentValue bEditing
         when (not editing) $ void $ element input # set value s
 
     let _elementTE = input
-        _userTE    = tidings bValue $ UI.valueChange input 
+        _userTE    = tidings bValue $ UI.valueChange input
     return TextEntry {..}
 
 {-----------------------------------------------------------------------------

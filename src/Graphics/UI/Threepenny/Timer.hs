@@ -6,7 +6,7 @@ module Graphics.UI.Threepenny.Timer (
     --
     -- NOTE: The timer may be rather wobbly unless you compile
     -- with the @-threaded@ option.
-    
+
     -- * Documentation
     Timer, timer,
     interval, running, tick, start, stop,
@@ -28,12 +28,12 @@ data Timer = Timer
     } deriving (Typeable)
 
 -- | Create a new timer
-timer :: UI Timer
-timer = liftIO $ do
+timer :: MonadIO m => Int -> m  Timer
+timer time = liftIO$ do
     tvRunning     <- newTVarIO False
-    tvInterval    <- newTVarIO 1000
+    tvInterval    <- newTVarIO time
     (tTick, fire) <- newEvent
-    
+
     forkIO $ forever $ do
         atomically $ do
             b <- readTVar tvRunning
@@ -41,10 +41,10 @@ timer = liftIO $ do
         wait <- atomically $ readTVar tvInterval
         fire ()
         threadDelay (wait * 1000)
-    
+
     let tRunning  = fromTVar tvRunning
-        tInterval = fromTVar tvInterval 
-    
+        tInterval = fromTVar tvInterval
+
     return $ Timer {..}
 
 -- | Timer event.
@@ -56,15 +56,15 @@ interval :: Attr Timer Int
 interval = fromGetSet tInterval
 
 -- | Whether the timer is running or not.
-running :: Attr Timer Bool
+running :: MonadIO m =>  ReadWriteAttrMIO m Timer Bool Bool
 running = fromGetSet tRunning
 
 -- | Start the timer.
-start :: Timer -> UI ()
+start :: MonadIO m =>Timer -> m ()
 start = set' running True
 
 -- | Stop the timer.
-stop :: Timer -> UI ()
+stop :: MonadIO m =>Timer -> m ()
 stop = set' running False
 
 fromTVar :: TVar a -> GetSet a a
@@ -72,7 +72,7 @@ fromTVar var = (atomically $ readTVar var, atomically . writeTVar var)
 
 type GetSet i o = (IO o, i -> IO ())
 
-fromGetSet :: (x -> GetSet i o) -> ReadWriteAttr x i o
+fromGetSet :: MonadIO m => (x -> GetSet i o) -> ReadWriteAttrMIO m x i o
 fromGetSet f = mkReadWriteAttr (liftIO . fst . f) (\i x -> liftIO $ snd (f x) i)
 
 

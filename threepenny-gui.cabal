@@ -72,6 +72,7 @@ Library
                      Foreign.JavaScript
                     ,Foreign.RemotePtr
                     ,Graphics.UI.Threepenny
+                    ,Graphics.UI.Threepenny.Internal
                     ,Graphics.UI.Threepenny.Attributes
                     ,Graphics.UI.Threepenny.Canvas
                     ,Graphics.UI.Threepenny.Core
@@ -92,7 +93,6 @@ Library
                     ,Foreign.JavaScript.Resources
                     ,Foreign.JavaScript.Server
                     ,Foreign.JavaScript.Types
-                    ,Graphics.UI.Threepenny.Internal
                     ,Reactive.Threepenny.Memo
                     ,Reactive.Threepenny.Monads
                     ,Reactive.Threepenny.PulseLatch

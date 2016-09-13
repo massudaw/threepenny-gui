@@ -11,6 +11,7 @@ module Graphics.UI.Threepenny (
     module Graphics.UI.Threepenny.Canvas,
     module Graphics.UI.Threepenny.DragNDrop,
     module Graphics.UI.Threepenny.Elements,
+
     module Graphics.UI.Threepenny.Events,
     module Graphics.UI.Threepenny.JQuery,
     module Graphics.UI.Threepenny.Timer,
@@ -30,6 +31,7 @@ import           Graphics.UI.Threepenny.Widgets
 {- $intro
 
 Welcome to the Threepenny library for graphical user interfaces.
+
 
 A program written with Threepenny is essentially a small web server
 that displays the user interface as a web page to any browser that connects to it.
