@@ -3,7 +3,7 @@ module Graphics.UI.Threepenny.Events (
     -- | Events on DOM elements.
 
     -- * Convenience events
-    valueChange, selectionChange, checkedChange,
+    onChangeE,valueChange, selectionChange, checkedChange,
 
     -- * Standard DOM events
     click, mousemove, mousedown, mouseup, hover, leave,
@@ -22,6 +22,9 @@ silence = fmap (const ())
 -- | Event that occurs when the /user/ changes the value of the input element.
 valueChange :: Element -> Event String
 valueChange el = unsafeMapUI el (const $ get value el) (domEvent "keydown" el)
+
+onChangeE :: Element -> Event String
+onChangeE el = unsafeMapUI el (const $ get value el) (domEvent "onchange" el)
 
 unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w ->  fmap fst $ runDynamic $ runUI w (f a))
 

@@ -35,9 +35,9 @@ import           Foreign.RemotePtr            as Foreign
 -- | Run a "Foreign.JavaScript" server.
 serve
     :: Config               -- ^ Configuration options.
-    -> (Window -> IO ())    -- ^ Initialization whenever a client connects.
+    -> (Window -> IO (IO ()))    -- ^ Initialization whenever a client connects.
     -> IO ()
-serve config init = httpComm config (eventLoop init)
+serve config init = httpComm config (eventLoop init )
 
 {-----------------------------------------------------------------------------
     JavaScript

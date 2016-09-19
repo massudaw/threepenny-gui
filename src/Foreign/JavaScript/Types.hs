@@ -10,7 +10,6 @@ import           Data.Aeson              as JSON
 import           Data.ByteString.Char8           (ByteString)
 import qualified Data.ByteString.Char8   as BS   (hPutStrLn)
 import           Data.IORef
-import           Data.Map                as Map
 import           Data.String
 import           Data.Text
 import           System.IO                       (stderr)
@@ -22,7 +21,7 @@ import Foreign.RemotePtr
 ------------------------------------------------------------------------------}
 -- | Configuration of a "Foreign.JavaScript" server.
 data Config = Config
-    { jsPort       :: Maybe Int           
+    { jsPort       :: Maybe Int
         -- ^ Port number.
         -- @Nothing@ means that the port number is
         -- read from the environment variable @PORT@.

@@ -95,8 +95,8 @@ type Handler a = a -> IO ()
 
 -- | Create a new event.
 -- Also returns a function that triggers an event occurrence.
-newEvent :: IO (Event a, Handler a)
-newEvent = do
+newEvent :: MonadIO m => m (Event a, Handler a)
+newEvent = liftIO$ do
     (p, fire) <- Prim.newPulse
     return (E $ fromPure p, fire)
 

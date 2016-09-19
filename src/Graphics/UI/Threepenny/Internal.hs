@@ -5,7 +5,7 @@ module Graphics.UI.Threepenny.Internal (
     -- 'UI' monad, integrating FRP and JavaScript FFI. garbage collection
 
     -- * Documentation
-    Window, disconnect,
+    Window(..), disconnect,
     startGUI,
 
     UI, runUI, liftIOLater, askWindow,ui,
@@ -19,6 +19,7 @@ module Graphics.UI.Threepenny.Internal (
     EventData, domEvent, unsafeFromJSON,
     ) where
 
+import Data.Unique
 import           Control.Applicative                   (Applicative)
 import           Control.Monad
 import qualified Control.Monad.Trans.Writer as Writer
@@ -36,13 +37,15 @@ import qualified Reactive.Threepenny     as E
 import Reactive.Threepenny    (Dynamic)
 
 import Foreign.JavaScript hiding (runFunction, callFunction, debug, timestamp, Window)
+import System.Mem (performGC)
 
 {-----------------------------------------------------------------------------
     Custom Window type
 ------------------------------------------------------------------------------}
 -- | The type 'Window' represents a browser window.
 data Window = Window
-    { jsWindow    :: JS.Window  -- JavaScript window
+    { wId :: Int
+    , jsWindow    :: JS.Window  -- JavaScript window
     , eDisconnect :: E.Event () -- event that happens when client disconnects
     , wEvents     :: Foreign.Vendor Events
                      -- events associated to 'Element's
@@ -54,25 +57,29 @@ data Window = Window
 startGUI
     :: Config               -- ^ Server configuration.
     -> (Window -> UI ())    -- ^ Action to run whenever a client browser connects.
+    ->  (IO Int)
+    -> (Window -> IO ())
     -> IO ()
-startGUI config init = JS.serve config $ \w -> do
+startGUI config init preinit finalizer = JS.serve config ( \w -> do
     -- set up disconnect event
     (eDisconnect, handleDisconnect) <- E.newEvent
-    JS.onDisconnect w $ handleDisconnect ()
 
     -- make window
     wEvents   <- Foreign.newVendor
     wChildren <- Foreign.newVendor
+    windowId <- preinit
     let window = Window
-            { jsWindow    = w
+            { wId = windowId
+            , jsWindow    = w
             , eDisconnect = eDisconnect
             , wEvents     = wEvents
             , wChildren   = wChildren
             }
 
     -- run initialization
-    Writer.execWriterT $ runUI window $ init window
-    return ()
+    fin <- Writer.execWriterT $ runUI window $ init window
+    JS.onDisconnect w $ putStrLn ("Finalize GUI: finalizers (" ++ show (length fin) ++ ")") >> sequence fin >>  (finalizer window ) >> handleDisconnect () >> performGC
+    return (finalizer window))
 
 -- | Event that occurs whenever the client has disconnected,
 -- be it by closing the browser window or by exception.

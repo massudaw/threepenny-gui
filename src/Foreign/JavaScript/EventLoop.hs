@@ -14,7 +14,6 @@ import           Control.Exception        as E    (finally)
 import           Control.Monad
 import qualified Data.Aeson               as JSON
 import           Data.IORef
-import qualified Data.Map                 as Map
 import qualified Data.Text                as T
 import qualified System.Mem
 
@@ -41,10 +40,10 @@ handleEvent w@(Window{..}) (name, args, consistency) = do
 
 -- | Event loop for a browser window.
 -- Supports concurrent invocations of `runEval` and `callEval`.
-eventLoop :: (Window -> IO void) -> (Comm -> IO ())
+eventLoop :: (Window -> IO (IO ())) ->  (Comm -> IO ())
 eventLoop init comm = do
     -- To support concurrent FFI calls, we make three threads.
-    -- The thread `multiplexer` reads from the client and 
+    -- The thread `multiplexer` reads from the client and
     --   sorts the messages into the appropriate queue.
     events      <- newTQueueIO
     results     <- newTQueueIO :: IO (TQueue JSON.Value)
@@ -75,7 +74,7 @@ eventLoop init comm = do
     -- We also send a separate event when the client disconnects.
     disconnect <- newTVarIO $ return ()
     let onDisconnect m = atomically $ writeTVar disconnect m
-    
+
     let w = w0 { runEval        = run  . RunEval
                , callEval       = call . CallEval
                , debug        = debug
@@ -101,7 +100,7 @@ eventLoop init comm = do
                         return Nothing
                     Quit      -> Just <$> readTVar disconnect
             m
-        
+
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             ref <- atomically $ do
@@ -116,17 +115,18 @@ eventLoop init comm = do
                         result <- readTQueue results
                         putTMVar ref result
                     Nothing  -> return ()
-    
+
     -- Receive events from client and handle them in order.
     let handleEvents = do
-            init w
-            forever $ do
+            i<-init w
+            E.finally (forever $ do
                 e <- atomically $ do
                     writeTVar handling True
                     readTQueue events
                 handleEvent w e
                 rebug
-                atomically $ writeTVar handling False
+                atomically $ writeTVar handling False) (void i)
+            return undefined
 
     -- Foreign.addFinalizer (wRoot w) $ putStrLn "wRoot garbage collected."
     Foreign.withRemotePtr (wRoot w) $ \_ _ -> do    -- keep root alive

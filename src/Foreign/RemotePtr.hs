@@ -3,7 +3,7 @@
 module Foreign.RemotePtr (
     -- * Synopsis
     -- | Toolbox for managing remote objects in Haskell.
-    
+
     -- * RemotePtr
     RemotePtr,
     withRemotePtr, addFinalizer, destroy, addReachable, clearReachable,
@@ -19,7 +19,7 @@ import Prelude hiding (lookup)
 import Control.Monad
 import           Control.Concurrent
 import qualified Data.Text             as T
-import qualified Data.Map              as Map
+import qualified Data.HashMap.Strict              as Map
 import Data.Functor
 import Data.IORef
 
@@ -53,13 +53,13 @@ mkWeakIORefValue r@(GHC.IORef (GHC.STRef r#)) v f = GHC.IO $ \s ->
   case GHC.mkWeak# r# v f s of (# s1, w #) -> (# s1, GHC.Weak w #)
 #endif
 
-type Map = Map.Map
+type Map = Map.HashMap
 
 {-----------------------------------------------------------------------------
     Types
 ------------------------------------------------------------------------------}
 -- | A 'Coupon' is a unique identifier.
--- 
+--
 -- It is a string of alphanumeric ASCII characters and it is intended to
 -- be sent to or received from a remote program.
 --
@@ -68,7 +68,7 @@ type Coupon = T.Text
 
 
 -- | A 'RemotePtr' is a pointer to a foreign object.
--- 
+--
 -- Like a 'ForeignPtr', it refers to an object managed by an environment
 -- external to the Haskell runtime.
 -- Likewise, you can assign finalizers to a 'RemotePtr'. The finalizers
@@ -132,7 +132,7 @@ newRemotePtr coupon value Vendor{..} = do
     children <- newIORef []
     let self = undefined
     ptr      <- newIORef RemoteData{..}
-    
+
     let finalize = modifyMVar coupons $ \m -> return (Map.delete coupon m, ())
     w <- mkWeakIORef ptr finalize
     modifyMVar coupons $ \m -> return (Map.insert coupon w m, ())
@@ -143,7 +143,7 @@ newRemotePtr coupon value Vendor{..} = do
     RemotePtr
 ------------------------------------------------------------------------------}
 -- | Access the data of the 'RemotePtr'.
--- 
+--
 -- While the action is being performed, it is ensured that the 'RemotePtr'
 -- will not be garbage collected
 -- and its 'Coupon' can be successfully redeemed at the 'Vendor'.
@@ -201,7 +201,7 @@ addReachable parent child = do
     atomicModifyIORef' ref $ \ws -> (SomeWeak w:ws, ())
 
 -- | Clear all dependencies.
--- 
+--
 -- Reachability of this 'RemotePtr' no longer implies reachability
 -- of other items, as formerly implied by calls to 'addReachable'.
 clearReachable :: RemotePtr a -> IO ()

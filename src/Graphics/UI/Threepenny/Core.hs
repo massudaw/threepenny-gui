@@ -31,7 +31,7 @@ module Graphics.UI.Threepenny.Core (
 
     -- * Events
     -- | For a list of predefined events, see "Graphics.UI.Threepenny.Events".
-    EventData, domEvent, unsafeFromJSON, disconnect, on, onEvent, onChanges, mapEventFin,mapEventDyn,
+    EventData, domEvent, unsafeFromJSON, disconnect, on, onEvent, onChanges, mapEventDyn,
     module Reactive.Threepenny,
 
     -- * Attributes
@@ -258,13 +258,6 @@ mapEventDyn f x = do
     return  e
 
 
-
-
-mapEventFin ::MonadIO m =>  (a -> IO b) -> Event a -> m (Event b, [IO ()])
-mapEventFin f x = liftIO $ do
-    (e,h) <- liftIO $ newEvent' x
-    fin <- runDynamic $ onEventIO x (\i -> void $ forkIO $ (f i)  >>= h)
-    return  (e,snd fin)
 
 
 
