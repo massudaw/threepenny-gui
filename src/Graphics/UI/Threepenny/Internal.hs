@@ -78,7 +78,7 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
 
     -- run initialization
     fin <- Writer.execWriterT $ runUI window $ init window
-    JS.onDisconnect w $ putStrLn ("Finalize GUI: finalizers (" ++ show (length fin) ++ ")") >> sequence fin >>  (finalizer window ) >> handleDisconnect () >> performGC
+    JS.onDisconnect w $ putStrLn ("Finalize GUI: finalizers (" ++ show (length fin) ++ ")") >> sequence_ fin >>  (finalizer window ) >> performGC  >> handleDisconnect ()
     return (finalizer window))
 
 -- | Event that occurs whenever the client has disconnected,

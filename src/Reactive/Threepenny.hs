@@ -42,7 +42,7 @@ module Reactive.Threepenny (
     -- * Internal
     -- | Functions reserved for special circumstances.
     -- Do not use unless you know what you're doing.
-    onChange, unsafeMapIO, newEventsNamed,
+    onChange, unsafeMapIO, newEventsNamed,mapEventDyn
     ) where
 
 import Control.Applicative
@@ -50,6 +50,7 @@ import Control.Monad (void)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Data.IORef
+import Control.Concurrent(forkIO)
 import qualified Data.Map as Map
 
 import           Reactive.Threepenny.Memo       as Memo
@@ -60,6 +61,7 @@ type Pulse = Prim.Pulse
 type Latch = Prim.Latch
 type Map   = Map.Map
 type Dynamic  = Writer.WriterT [IO ()] IO
+
 runDynamic = Writer.runWriterT
 
 {-----------------------------------------------------------------------------
@@ -396,6 +398,15 @@ pair (T bx ex) (T by ey) = T b e
     x = flip (,) <$> by <@> ex
     y = (,) <$> bx <@> ey
     e = unionWith (\(x,_) (_,y) -> (x,y)) x y
+
+mapEventDyn ::(a -> Dynamic b) -> Event a -> Dynamic (Event (b,[IO()]) )
+mapEventDyn f x = do
+    (e,h) <- liftIO $ newEvent' x
+    onEventIO x (\i -> void $ (runDynamic $ f i)  >>= h)
+    return  e
+
+
+
 
 
 {-----------------------------------------------------------------------------

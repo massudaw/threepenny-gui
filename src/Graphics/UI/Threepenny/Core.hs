@@ -60,7 +60,6 @@ import Control.Monad          (forM_, forM, void)
 import Control.Monad.Fix
 import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
-import Control.Concurrent (forkIO)
 
 import qualified Data.Aeson                      as JSON
 import qualified Foreign.JavaScript              as JS
@@ -250,13 +249,6 @@ onChanges :: Behavior a -> (a -> UI void) -> UI ()
 onChanges b f = do
     window <- askWindow
     ui $ Reactive.onChange b (void . runDynamic . runUI window . f)
-
-mapEventDyn ::(a -> Dynamic b) -> Event a -> Dynamic (Event (b,[IO()]) )
-mapEventDyn f x = do
-    (e,h) <- liftIO $ newEvent' x
-    onEventIO x (\i -> void $ (runDynamic $ f i)  >>= h)
-    return  e
-
 
 
 
