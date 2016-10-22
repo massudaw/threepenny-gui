@@ -60,6 +60,7 @@ receiveMessages w msgs messageArea = do
         runUI w $ do
           element messageArea #+ [mkMessage msg]
           UI.scrollToBottom messageArea
+          flushCallBuffer -- make sure that JavaScript functions are executed
 
 mkMessageArea :: Chan Message -> IORef String -> UI Element
 mkMessageArea msgs nickname = do
