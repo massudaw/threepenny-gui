@@ -173,10 +173,10 @@ data CallBufferMode
 
 -- | Representation of a browser window.
 data Window = Window
-    { runEval        :: String -> IO ()
-    , callEval       :: String -> IO JSON.Value
+    { runEval        :: IO String -> IO ()
+    , callEval       :: IO String -> IO JSON.Value
 
-    , wCallBuffer     :: TVar (String -> String)
+    , wCallBuffer     :: TVar (String -> IO String)
     , wCallBufferMode :: TVar CallBufferMode
 
     , timestamp      :: IO ()
@@ -194,7 +194,7 @@ data Window = Window
 newPartialWindow :: IO Window
 newPartialWindow = do
     ptr <- newRemotePtr "" () =<< newVendor
-    b1  <- newTVarIO id
+    b1  <- newTVarIO return
     b2  <- newTVarIO BufferRun
     let nop = const $ return ()
     Window nop undefined b1 b2 (return ()) nop nop ptr <$> newVendor <*> newVendor

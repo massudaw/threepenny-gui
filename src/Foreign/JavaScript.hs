@@ -41,9 +41,10 @@ serve
     :: Config               -- ^ Configuration options.
     -> (Window -> IO (IO ()))    -- ^ Initialization whenever a client connects.
     -> IO ()
-serve config init = httpComm config $ (eventLoop init)$ \w -> do
-    init w
-    flushCallBuffer w   -- make sure that all `runEval` commands are executed
+serve config init = httpComm config $ eventLoop $ \w -> do
+  i <- init w
+  flushCallBuffer w   -- make sure that all `runEval` commands are executed
+  return i
 
 {-----------------------------------------------------------------------------
     JavaScript
@@ -53,7 +54,7 @@ serve config init = httpComm config $ (eventLoop init)$ \w -> do
 -- NOTE: The JavaScript function is subject to buffering,
 -- and may not be run immediately. See 'setCallBufferMode'.
 runFunction :: Window -> JSFunction () -> IO ()
-runFunction w f = bufferRunEval w =<< toCode f
+runFunction w f = bufferRunEval w  (toCode f)
 
 
 -- | Run a JavaScript function that creates a new object.
@@ -65,14 +66,14 @@ runFunction w f = bufferRunEval w =<< toCode f
 unsafeCreateJSObject :: Window -> JSFunction NewJSObject -> IO JSObject
 unsafeCreateJSObject w f = do
     g <- wrapImposeStablePtr w f
-    bufferRunEval w =<< toCode g
+    bufferRunEval w (toCode g)
     marshalResult g w JSON.Null
 
 -- | Call a JavaScript function and wait for the result.
 callFunction :: Window -> JSFunction a -> IO a
 callFunction w f = do
     flushCallBuffer w -- FIXME: Add the code of f to the buffer as well!
-    resultJS <- callEval w =<< toCode f
+    resultJS <- callEval w (toCode f)
     marshalResult f w resultJS
 
 -- | Export a Haskell function as an event handler.
@@ -111,25 +112,25 @@ flushCallBuffer :: Window -> IO ()
 flushCallBuffer w@Window{..} = do
     code' <- atomically $ do
         code <- readTVar wCallBuffer
-        writeTVar wCallBuffer id
+        writeTVar wCallBuffer return
         return code
-    let code = code' ""
-    unless (null code) $
-        runEval code
+    runEval (code' "")
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
-bufferRunEval :: Window -> String -> IO ()
-bufferRunEval w@Window{..} code = do
-    action <- atomically $ do
+bufferRunEval :: Window -> IO String -> IO ()
+bufferRunEval w@Window{..} icode = do
+  action <- atomically $ do
         mode <- readTVar wCallBufferMode
         case mode of
             BufferRun -> do
                 msg <- readTVar wCallBuffer
-                writeTVar wCallBuffer (msg . (\s -> ";" ++ code ++ s))
+                writeTVar wCallBuffer (\i -> do
+                  code <- icode
+                  msg (";" ++ code ++ i) )
                 return Nothing
             NoBuffering -> do
-                return $ Just code
-    case action of
-        Nothing   -> return ()
-        Just code -> runEval code
+              return $ Just icode
+  case action of
+    Nothing -> return ()
+    Just i -> runEval i

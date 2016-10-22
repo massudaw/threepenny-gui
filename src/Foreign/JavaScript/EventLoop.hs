@@ -50,7 +50,7 @@ eventLoop init comm = do
     -- The thread `handleCalls` executes FFI calls
     --    from the Haskell side in order.
     -- The corresponding queue records `TMVar`s in which to put the results.
-    calls       <- newTQueueIO :: IO (TQueue (Maybe (TMVar JSON.Value), ServerMsg))
+    calls       <- newTQueueIO :: IO (TQueue (Maybe (TMVar JSON.Value), IO ServerMsg))
     -- The thread `handleEvents` handles client Events in order.
 
     -- Events will be queued (and labelled `Inconsistent`) whenever
@@ -75,10 +75,10 @@ eventLoop init comm = do
     disconnect <- newTVarIO $ return ()
     let onDisconnect m = atomically $ writeTVar disconnect m
 
-    let w = w0 { runEval        = run  . RunEval
-               , callEval       = call . CallEval
+    let w = w0 { runEval        = (\i -> run  $ fmap RunEval i)
+               , callEval       = (\i -> call $ fmap CallEval i)
                , debug        = debug
-               , timestamp    = run Timestamp
+               , timestamp    = run (return Timestamp)
                , onDisconnect = onDisconnect
                }
 
@@ -103,11 +103,12 @@ eventLoop init comm = do
 
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
-            ref <- atomically $ do
+            (ref,msgio) <- atomically $ do
                 (ref, msg) <- readTQueue calls
                 writeTVar calling True
-                writeServer comm msg
-                return ref
+                return (ref,msg)
+            msg <- msgio
+            atomically $ writeServer comm msg
             atomically $ do
                 writeTVar calling False
                 case ref of
@@ -168,6 +169,6 @@ fromJSStablePtr js w@(Window{..}) = do
         Nothing -> do
             ptr <- newRemotePtr coupon (JSPtr coupon) wJSObjects
             addFinalizer ptr $
-                runEval ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')")
+              runEval ( return ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')"))
             return ptr
 

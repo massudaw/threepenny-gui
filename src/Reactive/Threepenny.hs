@@ -6,7 +6,7 @@ module Reactive.Threepenny (
     -- * Types
     -- $intro
     Event, Behavior,Dynamic,
-    runDynamic,
+    runDynamic,registerDynamic,
 
     -- * IO
     -- | Functions to connect events to the outside world.
@@ -55,14 +55,19 @@ import qualified Data.Map as Map
 
 import           Reactive.Threepenny.Memo       as Memo
 import qualified Reactive.Threepenny.PulseLatch as Prim
-import qualified Control.Monad.Trans.Writer as Writer
+import qualified Control.Monad.Trans.State.Strict as State
 
 type Pulse = Prim.Pulse
 type Latch = Prim.Latch
 type Map   = Map.Map
-type Dynamic  = Writer.WriterT [IO ()] IO
+type Dynamic  = State.StateT [IO ()] IO
 
-runDynamic = Writer.runWriterT
+runDynamic :: Dynamic a -> IO (a,[IO()])
+runDynamic w = State.runStateT w []
+
+
+registerDynamic :: IO () -> Dynamic  ()
+registerDynamic w = State.modify' (w:)
 
 {-----------------------------------------------------------------------------
     Types
@@ -86,7 +91,7 @@ newtype Event    a = E { unE :: Memo (Pulse a) }
 
 > type Behavior a = Time -> a
 -}
-data    Behavior a = B { latch :: Latch a, changes :: Event () }
+data  Behavior a = B { latch :: Latch a, changes :: Event () }
 
 {-----------------------------------------------------------------------------
     IO
@@ -143,7 +148,7 @@ register :: Event a -> Handler a -> Dynamic ()
 register e h = do
     p <- liftIO$ at (unE e)     -- evaluate the memoized action
     r <- liftIO $ Prim.addHandler p h
-    Writer.tell [r]
+    State.modify' (r:)
     return ()
 
 
@@ -230,7 +235,7 @@ accumB a e = liftIO $ do
 accumBDyn :: a -> Event (a -> a) -> Dynamic  (Behavior a)
 accumBDyn a e = do
   (l1,p1,unH) <- liftIO$ Prim.accumL a =<< at (unE e)
-  Writer.tell [unH]
+  State.modify' (unH:)
   p2      <- liftIO$ Prim.mapP (const ()) p1
   return $ B l1 (E $ fromPure p2)
 

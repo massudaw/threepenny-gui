@@ -24,7 +24,7 @@ module Graphics.UI.Threepenny.Internal (
 import Data.Unique
 import           Control.Applicative                   (Applicative)
 import           Control.Monad
-import qualified Control.Monad.Trans.Writer as Writer
+import qualified Control.Monad.Trans.State.Strict as State
 import           Control.Monad.Fix
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
@@ -81,7 +81,7 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
             }
 
     -- run initialization
-    fin <- Writer.execWriterT $ runUI window $ init window
+    fin <- State.execStateT ( runUI window $ init window) []
     JS.onDisconnect w $ putStrLn ("Finalize GUI: finalizers (" ++ show (length fin) ++ ")") >> sequence_ fin >>  (finalizer window ) >> performGC  >> handleDisconnect ()
     return (finalizer window))
 
@@ -308,7 +308,7 @@ liftIOLater :: Dynamic () -> UI ()
 liftIOLater x = UI $ Monad.tell [x]
 
 registerFin :: IO () -> Dynamic ()
-registerFin x = Writer.tell [x]
+registerFin x = State.modify (x:)
 
 {-----------------------------------------------------------------------------
     FFI
