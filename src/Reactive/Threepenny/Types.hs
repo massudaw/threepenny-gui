@@ -1,6 +1,6 @@
 module Reactive.Threepenny.Types where
 
-import Control.Monad.Trans.RWS.Lazy
+import Control.Monad.Trans.State.Lazy
 import Data.Functor.Identity ()
 
 import           Data.Hashable
@@ -28,7 +28,7 @@ data Latch a = Latch { readL :: EvalL a }
     Monads
 ------------------------------------------------------------------------------}
 -- | The 'EvalP' monad is used to evaluate pulses.
-type EvalP = RWST () () Values BuildIO
+type EvalP = StateT Values BuildIO
     -- state: current pulse values
 
 -- | The 'EvalL' monad is used to evaluate latches.

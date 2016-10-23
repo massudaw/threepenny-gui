@@ -32,6 +32,7 @@ import           Foreign.JavaScript.Marshal
 import           Foreign.JavaScript.Server
 import           Foreign.JavaScript.Types
 import           Foreign.RemotePtr            as Foreign
+import Data.List (intercalate)
 
 {-----------------------------------------------------------------------------
     Server
@@ -114,7 +115,7 @@ flushCallBuffer w@Window{..} = do
         code <- readTVar wCallBuffer
         writeTVar wCallBuffer return
         return code
-    runEval (code' "")
+    runEval (intercalate ";" <$> code' [])
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
@@ -127,7 +128,7 @@ bufferRunEval w@Window{..} icode = do
                 msg <- readTVar wCallBuffer
                 writeTVar wCallBuffer (\i -> do
                   code <- icode
-                  msg (";" ++ code ++ i) )
+                  msg (code :i) )
                 return Nothing
             NoBuffering -> do
               return $ Just icode

@@ -31,7 +31,7 @@ module Reactive.Threepenny (
     unions, concatenate,
     -- ** Accumulation
     -- $accumulation
-    accumB,accumBDyn, mapAccum,
+    accumB, mapAccum,
 
     -- * Additional Notes
     -- $recursion
@@ -226,14 +226,9 @@ b <@ e = (const <$> b) <@> e
 --
 -- Note that the value of the behavior changes \"slightly after\"
 -- the events occur. This allows for recursive definitions.
-accumB :: MonadIO m => a -> Event (a -> a) -> m (Behavior a)
-accumB a e = liftIO $ do
-    (l1,p1,_) <- Prim.accumL a =<< at (unE e)
-    p2      <- Prim.mapP (const ()) p1
-    return $ B l1 (E $ fromPure p2)
 
-accumBDyn :: a -> Event (a -> a) -> Dynamic  (Behavior a)
-accumBDyn a e = do
+accumB :: a -> Event (a -> a) -> Dynamic  (Behavior a)
+accumB a e = do
   (l1,p1,unH) <- liftIO$ Prim.accumL a =<< at (unE e)
   State.modify' (unH:)
   p2      <- liftIO$ Prim.mapP (const ()) p1
@@ -250,7 +245,7 @@ accumBDyn a e = do
 -- Note that the smaller-than-sign in the comparision @timex < time@ means
 -- that the value of the behavior changes \"slightly after\"
 -- the event occurrences. This allows for recursive definitions.
-stepper :: MonadIO m => a -> Event a -> m (Behavior a)
+stepper :: a -> Event a -> Dynamic (Behavior a)
 stepper a e = accumB a (const <$> e)
 
 -- | The 'accumE' function accumulates a stream of events.
@@ -365,7 +360,7 @@ acc -> (x,acc) is the order used by 'unfoldr' and 'State'.
 -}
 
 -- | Efficient combination of 'accumE' and 'accumB'.
-mapAccum :: MonadIO m => acc -> Event (acc -> (x,acc)) -> m (Event x, Behavior acc)
+mapAccum :: acc -> Event (acc -> (x,acc)) -> Dynamic (Event x, Behavior acc)
 mapAccum acc ef = do
     e <- accumE (undefined,acc) ((. snd) <$> ef)
     b <- stepper acc (snd <$> e)

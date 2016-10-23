@@ -48,7 +48,7 @@ entry
 entry bValue = do -- single text entry
     input <- UI.input
 
-    bEditing <- stepper False $ and <$>
+    bEditing <- ui $ stepper False $ and <$>
         unions [True <$ UI.focus input, False <$ UI.blur input]
 
     window <- askWindow

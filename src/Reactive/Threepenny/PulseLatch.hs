@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, RecursiveDo #-}
+{-# LANGUAGE BangPatterns,RecordWildCards, RecursiveDo #-}
 module Reactive.Threepenny.PulseLatch (
     Pulse, newPulse, addHandler,
     neverP, mapP, filterJustP, unionWithP, unsafeMapIOP,dependOn,
@@ -11,8 +11,10 @@ module Reactive.Threepenny.PulseLatch (
 
 import Control.Applicative
 import Control.Monad
+import qualified Data.Foldable as F
 import Control.Monad.Trans.Class
-import Control.Monad.Trans.RWS     as Monad
+import Debug.Trace
+import Control.Monad.Trans.State as Monad
 
 import Data.IORef
 import Data.Monoid (Endo(..))
@@ -65,22 +67,28 @@ whenPulse p f = do
 newPulse :: Build (Pulse a, a -> IO ())
 newPulse = do
     key         <- Vault.newKey
-    handlersRef <- newIORef Map.empty      -- map of handlers
+    handlersRef <- newIORef (Map.empty,Map.empty)      -- map of handlers
 
     let
         -- add handler to map
+        first f (i,j) = (f i,j)
         addHandlerP :: ((Unique, Priority), Handler) -> Build (IO ())
-        addHandlerP (uid,m) = do
-            modifyIORef' handlersRef (Map.insert uid m)
-            return $ modifyIORef' handlersRef (Map.delete uid)
+        addHandlerP ((uid,DoLatch),m) = do
+          modifyIORef' handlersRef (first (Map.insert uid m))
+          return $ modifyIORef' handlersRef (first (Map.delete uid))
+        addHandlerP ((uid,DoIO),m) = do
+          modifyIORef' handlersRef (fmap (Map.insert uid m))
+          return $ modifyIORef' handlersRef (fmap (Map.delete uid))
+
 
         -- evaluate all handlers attached to this input pulse
         fireP a = do
             let pulses = Vault.insert key (Just a) $ Vault.empty
-            handlers <- readIORef handlersRef
-            (ms, _)  <- runEvalP pulses $ sequence $
-                   [m | ((_,DoLatch),m) <- Map.toList handlers]
-                ++ [m | ((_,DoIO   ),m) <- Map.toList handlers]
+            (handlersLatch,handlersIO) <- readIORef handlersRef
+            (ms, _)  <- runEvalP pulses $ do
+                i <- sequence handlersLatch
+                j <- sequence handlersIO
+                return (F.toList i ++ F.toList j)
             sequence_ ms
 
         evalP = join . Vault.lookup key <$> Monad.get
@@ -91,7 +99,9 @@ newPulse = do
 addHandler :: Pulse a -> (a -> IO ()) -> Build (IO ())
 addHandler p f = do
     uid <- newUnique
-    addHandlerP p ((uid, DoIO), whenPulse p f)
+    ! r <- addHandlerP p ((uid, DoIO), whenPulse p f)
+    return r
+
 
 -- | Read the value of a 'Latch' at a particular moment in Build.
 readLatch :: Latch a -> Build a

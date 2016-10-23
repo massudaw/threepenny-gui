@@ -1,6 +1,6 @@
 module Reactive.Threepenny.Monads where
 
-import Control.Monad.Trans.RWS.Lazy
+import Control.Monad.Trans.State.Lazy
 import Reactive.Threepenny.Types
 
 {-----------------------------------------------------------------------------
@@ -8,5 +8,5 @@ import Reactive.Threepenny.Types
 ------------------------------------------------------------------------------}
 runEvalP :: Values -> EvalP a -> IO (a, Values)
 runEvalP pulses m = do
-    (a, s, _) <- runRWST m () pulses
+    (a, s) <- runStateT m pulses
     return (a, s)

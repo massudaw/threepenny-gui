@@ -176,7 +176,7 @@ data Window = Window
     { runEval        :: IO String -> IO ()
     , callEval       :: IO String -> IO JSON.Value
 
-    , wCallBuffer     :: TVar (String -> IO String)
+    , wCallBuffer     :: TVar ([String] -> IO [String])
     , wCallBufferMode :: TVar CallBufferMode
 
     , timestamp      :: IO ()
