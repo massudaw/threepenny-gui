@@ -105,6 +105,11 @@ readClient c = do
         Success x -> return x
 
 -- | Messages sent by the Haskell server.
+notEmptyMsg (RunEval "") = Nothing
+notEmptyMsg (CallEval "") = Nothing
+notEmptyMsg (Debug "") = Nothing
+notEmptyMsg i = Just i
+
 data ServerMsg
     = RunEval  String
     | CallEval String

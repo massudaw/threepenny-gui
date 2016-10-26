@@ -10,8 +10,8 @@ module Foreign.RemotePtr (
     unprotectedGetCoupon,
 
     -- * Coupons and Vendors
-    Coupon, newCoupon,
-    Vendor, newVendor, lookup,
+    Coupon(..), newCoupon,
+    Vendor(..), newVendor, lookup,
     newRemotePtr,
     ) where
 

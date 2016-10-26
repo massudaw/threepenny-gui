@@ -6,11 +6,11 @@ module Reactive.Threepenny (
     -- * Types
     -- $intro
     Event, Behavior,Dynamic,
-    runDynamic,registerDynamic,
+    runDynamic,execDynamic,registerDynamic,closeDynamic,
 
     -- * IO
     -- | Functions to connect events to the outside world.
-    Handler, newEvent,newEvent', register,onEventIO,
+    Handler, newEvent, register,onEventIO,
     currentValue,
 
     -- * Core Combinators
@@ -42,11 +42,11 @@ module Reactive.Threepenny (
     -- * Internal
     -- | Functions reserved for special circumstances.
     -- Do not use unless you know what you're doing.
-    onChange, unsafeMapIO, newEventsNamed,mapEventDyn
+    onChange, unsafeMapIO, newEventsNamed,mapEventDyn,onEventDyn,onChangeDyn
     ) where
 
 import Control.Applicative
-import Control.Monad (void)
+import Control.Monad (void,(>=>))
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Data.IORef
@@ -62,12 +62,22 @@ type Latch = Prim.Latch
 type Map   = Map.Map
 type Dynamic  = State.StateT [IO ()] IO
 
+
 runDynamic :: Dynamic a -> IO (a,[IO()])
 runDynamic w = State.runStateT w []
 
+execDynamic :: Dynamic a -> IO [IO()]
+execDynamic w = State.execStateT w []
 
 registerDynamic :: IO () -> Dynamic  ()
 registerDynamic w = State.modify' (w:)
+
+closeDynamic :: Dynamic a -> IO a
+closeDynamic  m = do
+  (i,v) <- runDynamic m
+  sequence_ v
+  return i
+
 
 {-----------------------------------------------------------------------------
     Types
@@ -107,12 +117,6 @@ newEvent = liftIO$ do
     (p, fire) <- Prim.newPulse
     return (E $ fromPure p, fire)
 
-newEvent' :: Event b -> IO (Event a, Handler a)
-newEvent' e = do
-    pre <- at (unE e)
-    (p, fire) <- Prim.newPulse
-    return (E $ fromPure (p `Prim.dependOn` pre ), fire)
-
 
 -- | Create a series of events with delayed initialization.
 --
@@ -148,7 +152,7 @@ register :: Event a -> Handler a -> Dynamic ()
 register e h = do
     p <- liftIO$ at (unE e)     -- evaluate the memoized action
     r <- liftIO $ Prim.addHandler p h
-    State.modify' (r:)
+    registerDynamic r
     return ()
 
 
@@ -162,6 +166,16 @@ onChange :: Behavior a -> Handler a -> Dynamic ()
 onChange (B l e) h = do
     -- This works because latches are updated before the handlers are being called.
     register e (\_ -> h =<< Prim.readLatch l)
+
+onChangeDyn :: Behavior a -> (a -> Dynamic ()) -> Dynamic ()
+onChangeDyn (B  l e ) hf = mdo
+    -- This works because latches are updated before the handlers are being called.
+    (ev,h)<-newEvent
+    register ((,) <$> bv <@> e) (\(~(fin,_))-> sequence fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))-- (\_ -> h =<< Prim.readLatch l)
+    bv <- stepper [] ev
+    registerDynamic ( currentValue bv >>= sequence_ )
+    return ()
+
 
 -- | Read the current value of a 'Behavior'.
 currentValue :: MonadIO m => Behavior a -> m a
@@ -230,7 +244,7 @@ b <@ e = (const <$> b) <@> e
 accumB :: a -> Event (a -> a) -> Dynamic  (Behavior a)
 accumB a e = do
   (l1,p1,unH) <- liftIO$ Prim.accumL a =<< at (unE e)
-  State.modify' (unH:)
+  registerDynamic unH
   p2      <- liftIO$ Prim.mapP (const ()) p1
   return $ B l1 (E $ fromPure p2)
 
@@ -256,10 +270,11 @@ stepper a e = accumB a (const <$> e)
 --
 -- Note that the output events are simultaneous with the input events,
 -- there is no \"delay\" like in the case of 'accumB'.
-accumE :: MonadIO m =>  a -> Event (a -> a) -> m (Event a)
-accumE a e = liftIO $ do
-    (_,p,_) <-  Prim.accumL a =<< at (unE e)
-    return $ E $ fromPure p
+accumE :: a -> Event (a -> a) -> Dynamic (Event a)
+accumE a e = do
+  (_,p,unH) <-  liftIO $ Prim.accumL a =<< at (unE e)
+  registerDynamic unH
+  return $ E $ fromPure p
 
 instance Functor Behavior where
     fmap f ~(B l e) = B (Prim.mapL f l) e
@@ -348,8 +363,18 @@ concatenate :: [a -> a] -> (a -> a)
 concatenate = foldr (.) id
 
 onEventIO :: Event a -> (a -> IO void) -> Dynamic ()
-onEventIO e h = do
-      register e (void . h)
+onEventIO e h =   register e (void . h)
+
+onEventDyn
+  :: Event a ->  (a -> Dynamic b) -> Dynamic ()
+onEventDyn  e f =  mdo
+  (efin,hfin) <- newEvent
+  onEventIO ((,) <$> bfin <@>e ) (\ ~(fin,i) -> sequence_ fin >> (hfin  .snd =<< (runDynamic  ( f i) )) )
+  bfin <- stepper [] efin
+  registerDynamic $ sequence_ =<< currentValue bfin
+  return ()
+
+
 
 
 {- $accumulation
@@ -397,15 +422,14 @@ pair (T bx ex) (T by ey) = T b e
     b = (,) <$> bx <*> by
     x = flip (,) <$> by <@> ex
     y = (,) <$> bx <@> ey
-    e = unionWith (\(x,_) (_,y) -> (x,y)) x y
+    e = unionWith (\ ~(x,_) ~(_,y) -> (x,y)) x y
 
 mapEventDyn ::(a -> Dynamic b) -> Event a -> Dynamic (Event (b,[IO()]) )
 mapEventDyn f x = do
-    (e,h) <- liftIO $ newEvent' x
+    (e,h) <- liftIO $ newEvent
     onEventIO x (\i -> void $ (runDynamic $ f i)  >>= h)
+
     return  e
-
-
 
 
 

@@ -10,7 +10,7 @@ import Graphics.UI.Threepenny.Core
     Main
 ------------------------------------------------------------------------------}
 main :: IO ()
-main = startGUI defaultConfig setup
+main = startGUI defaultConfig setup (return 1 ) (const (return ()))
 
 setup :: Window -> UI ()
 setup window = void $ do

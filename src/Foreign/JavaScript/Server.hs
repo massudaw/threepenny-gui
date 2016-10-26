@@ -25,6 +25,7 @@ import qualified Network.WebSockets.Snap       as WS
 import           Snap.Core
 import qualified Snap.Http.Server              as Snap
 import           Snap.Util.FileServe
+import qualified Codec.Compression.Zlib as GZip
 
 -- import internal modules
 import Foreign.JavaScript.Resources
@@ -39,7 +40,7 @@ httpComm Config{..} worker = do
     env <- getEnvironment
     let portEnv = Safe.readMay =<< Prelude.lookup "PORT" env
     let addrEnv = fmap BS.pack $ Prelude.lookup "ADDR" env
-    
+
     let config = Snap.setPort      (maybe defaultPort id (jsPort `mplus` portEnv))
                $ Snap.setBind      (maybe defaultAddr id (jsAddr `mplus` addrEnv))
                $ Snap.setErrorLog  (Snap.ConfigIoLog jsLog)
@@ -66,23 +67,27 @@ communicationFromWebSocket request = do
     commOut    <- STM.newTQueueIO   -- incoming communication
 
     -- write data to browser
-    let sendData = forever $ do
+    --
+    let
+      compress = GZip.compressWith (GZip.defaultCompressParams {GZip.compressDictionary = Just $ BS.pack dict})
+      decompress = GZip.decompressWith (GZip.defaultDecompressParams {GZip.decompressDictionary = Just $ BS.pack dict})
+      sendData = forever $ do
             x <- atomically $ STM.readTQueue commOut
             -- see note [ServerMsg strictness]
-            WS.sendTextData connection . JSON.encode $ x
+            WS.sendBinaryData connection . compress . JSON.encode $ x
 
     -- read data from browser
     let readData = forever $ do
             input <- WS.receiveData connection
-            case input of
-                "ping" -> WS.sendTextData connection . LBS.pack $ "pong"
+            case decompress input of
+                "ping" -> WS.sendBinaryData connection .compress . LBS.pack $ "pong"
                 "quit" -> E.throw WS.ConnectionClosed
-                input  -> case JSON.decode input of
+                input  -> case JSON.decode  input of
                     Just x   -> atomically $ STM.writeTQueue commIn x
                     Nothing  -> error $
                         "Foreign.JavaScript: Couldn't parse JSON input"
                         ++ show input
-    
+
     let manageConnection = do
             withAsync sendData $ \_ -> do
             Left e <- waitCatch =<< async readData
@@ -91,7 +96,7 @@ communicationFromWebSocket request = do
             E.throw e
 
     thread <- forkFinally manageConnection
-        (\_ -> WS.sendClose connection $ LBS.pack "close")
+        (\_ -> WS.sendClose connection .compress $ LBS.pack "close")
     let commClose = killThread thread
 
     return $ Comm {..}
@@ -112,9 +117,9 @@ routeResources customHTML staticDir =
     where
     fixHandlers f routes = [(a,f b) | (a,b) <- routes]
     noCache h = modifyResponse (setHeader "Cache-Control" "no-cache") >> h
-    
+
     static = maybe [] (\dir -> [("/static", serveDirectory dir)]) staticDir
-    
+
     root = case customHTML of
         Just file -> case staticDir of
             Just dir -> serveFile (dir </> file)

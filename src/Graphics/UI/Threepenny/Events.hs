@@ -3,7 +3,7 @@ module Graphics.UI.Threepenny.Events (
     -- | Events on DOM elements.
 
     -- * Convenience events
-    onChangeE,valueChange, selectionChange, checkedChange,
+    onChangeE,onChangeEUI,valueChange,valueChangeUI, selectionChange,selectionChangeUI, checkedChange,checkedChangeUI,
 
     -- * Standard DOM events
     click, mousemove, mousedown, mouseup, hover, leave,
@@ -13,6 +13,7 @@ module Graphics.UI.Threepenny.Events (
 
 import Graphics.UI.Threepenny.Attributes
 import Graphics.UI.Threepenny.Core
+import Debug.Trace
 
 silence = fmap (const ())
 
@@ -23,17 +24,31 @@ silence = fmap (const ())
 valueChange :: Element -> Event String
 valueChange el = unsafeMapUI el (const $ get value el) (domEvent "keydown" el)
 
+valueChangeUI :: Element -> UI (Event String)
+valueChangeUI el = mapEventUI el (const $ get value el) (domEvent "keydown" el)
+
 onChangeE :: Element -> Event String
 onChangeE el = unsafeMapUI el (const $ get value el) (domEvent "onchange" el)
 
+onChangeEUI :: Element -> UI (Event String)
+onChangeEUI el = mapEventUI el (const $ get value el) (domEvent "onchange" el)
+
 unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w ->  fmap fst $ runDynamic $ runUI w (f a))
+mapEventUI el f e =  ui $ fmap fst <$> (mapEventDyn (\a -> liftIO (getWindow el) >>= (\w -> runUI w (f a))) e )
 
 -- | Event that occurs when the /user/ changes the selection of a @<select>@ element.
 selectionChange :: Element -> Event (Maybe Int)
-selectionChange el = unsafeMapUI el (const $ get selection el) (click el)
+selectionChange el = unsafeMapUI el ((const $ get selection el)) (click el)
+
+
+selectionChangeUI :: Element -> UI (Event (Maybe Int))
+selectionChangeUI el = mapEventUI el (const $ get selection el) (click el)
 
 -- | Event that occurs when the /user/ changes the checked status of an input
 -- element of type checkbox.
+checkedChangeUI :: Element -> UI (Event Bool)
+checkedChangeUI el = mapEventUI el (const $ get checked el) (click el)
+
 checkedChange :: Element -> Event Bool
 checkedChange el = unsafeMapUI el (const $ get checked el) (click el)
 
@@ -43,6 +58,7 @@ checkedChange el = unsafeMapUI el (const $ get checked el) (click el)
 -- | Mouse click.
 click :: Element -> Event ()
 click = silence . domEvent "click"
+
 
 -- | Mouse enters an element.
 hover :: Element -> Event ()

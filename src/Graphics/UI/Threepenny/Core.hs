@@ -242,14 +242,14 @@ on f x = void . onEvent (f x)
 onEvent :: Event a -> (a -> UI void) -> UI ()
 onEvent e h = do
     window <- askWindow
-    ui $ register e (void . runDynamic . runUI window . h)
+    ui $ Reactive.onEventDyn e (void . runUI window . h)
 
 -- | Execute a 'UI' action whenever a 'Behavior' changes.
 -- Use sparingly, it is recommended that you use 'sink' instead.
 onChanges :: Behavior a -> (a -> UI void) -> UI ()
 onChanges b f = do
     window <- askWindow
-    ui $ Reactive.onChange b (void . runDynamic . runUI window . f)
+    ui $ Reactive.onChangeDyn b (void . runUI window . f)
 
 
 
@@ -322,7 +322,7 @@ sink attr bi mx = do
     liftIOLater $ do
         i <- currentValue bi
         runUI window $ set' attr i x
-        Reactive.onChange bi  $ \i -> void $ runDynamic $ runUI window $ set' attr i x
+        Reactive.onChangeDyn bi  $ \i -> void $ runUI window $ set' attr i x
         return ()
     return x
 

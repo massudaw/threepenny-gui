@@ -21,6 +21,7 @@ module Graphics.UI.Threepenny.Internal (
     EventData, domEvent, unsafeFromJSON,
     ) where
 
+import Control.Exception
 import Data.Unique
 import           Control.Applicative                   (Applicative)
 import           Control.Monad
@@ -61,7 +62,7 @@ data Window = Window
 startGUI
     :: Config               -- ^ Server configuration.
     -> (Window -> UI ())    -- ^ Action to run whenever a client browser connects.
-    ->  (IO Int)
+    ->  (Dynamic Int)
     -> (Window -> IO ())
     -> IO ()
 startGUI config init preinit finalizer = JS.serve config ( \w -> do
@@ -71,7 +72,7 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
     -- make window
     wEvents   <- Foreign.newVendor
     wChildren <- Foreign.newVendor
-    windowId <- preinit
+    (windowId ,finini) <- E.runDynamic $ preinit
     let window = Window
             { wId = windowId
             , jsWindow    = w
@@ -81,8 +82,8 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
             }
 
     -- run initialization
-    fin <- State.execStateT ( runUI window $ init window) []
-    JS.onDisconnect w $ putStrLn ("Finalize GUI: finalizers (" ++ show (length fin) ++ ")") >> sequence_ fin >>  (finalizer window ) >> performGC  >> handleDisconnect ()
+    fin <- E.execDynamic ( runUI window $ init window) `catch` (\e -> putStrLn (show (e :: SomeException)) >> finalizer window >> handleDisconnect () >> Foreign.clearReachable (JS.root w)>>Foreign.destroy (JS.root w) >> return ([return ()]) )
+    JS.onDisconnect w $ putStrLn ("Finalize GUI: finalizers (" ++ show (length fin) ++ ")") >> sequence_ (finini ++ fin) >>  (finalizer window )>> Foreign.clearReachable (JS.root w) >> Foreign.destroy (JS.root w)>> performGC  >> handleDisconnect ()
     return (finalizer window))
 
 -- | Event that occurs whenever the client has disconnected,
@@ -135,10 +136,10 @@ getChildren el window@Window{ wChildren = wChildren } =
 
 -- | Convert JavaScript object into an Element by attaching relevant information.
 -- The JavaScript object may still be subject to garbage collection.
-fromJSObject0 :: JS.JSObject -> Window -> IO Element
+fromJSObject0 :: JS.JSObject -> Window -> Dynamic Element
 fromJSObject0 el window = do
     events   <- getEvents   el window
-    children <- getChildren el window
+    children <- liftIO$ getChildren el window
     return $ Element el events children  window
 
 -- | Convert JavaScript object into an element.
@@ -148,8 +149,8 @@ fromJSObject0 el window = do
 fromJSObject :: JS.JSObject -> UI Element
 fromJSObject el = do
     window <- askWindow
-    liftIO $ do
-        Foreign.addReachable (JS.root $ jsWindow window) el
+    ui $ do
+        liftIO$ Foreign.addReachable (JS.root $ jsWindow window) el
         fromJSObject0 el window
 
 -- | Add lazy FRP events to a JavaScript object.
@@ -173,13 +174,15 @@ addEvents el Window{ jsWindow = w, wEvents = wEvents } = do
     return events
 
 -- | Lookup or create lazy events for a JavaScript object.
-getEvents :: JS.JSObject -> Window -> IO Events
+getEvents :: JS.JSObject -> Window -> E.Dynamic Events
 getEvents el window@Window{ wEvents = wEvents } = do
-    Foreign.withRemotePtr el $ \coupon _ -> do
+    E.registerDynamic (Foreign.destroy el)
+    liftIO$ Foreign.withRemotePtr el $ \coupon _ -> do
         mptr <- Foreign.lookup coupon wEvents
         case mptr of
             Nothing -> addEvents el window
-            Just p  -> Foreign.withRemotePtr p $ \_ -> return
+            Just p  -> do
+              Foreign.withRemotePtr p $ \_ -> return
 
 -- | Events may carry data. At the moment, they may return
 -- a single JSON value, as defined in the "Data.Aeson" module.
@@ -214,17 +217,17 @@ mkElementNamespace :: Maybe String -> String -> UI Element
 mkElementNamespace namespace tag = do
     window <- askWindow
     let w = jsWindow window
-    liftIO $ do
-        el <- JS.unsafeCreateJSObject w $ case namespace of
+    ui $ do
+        el <- liftIO$ JS.unsafeCreateJSObject w $ case namespace of
             Nothing -> ffi "document.createElement(%1)" tag
             Just ns -> ffi "document.createElementNS(%1,%2)" ns tag
         fromJSObject0 el window
 
 -- | Delete the given element.
 delete :: Element -> UI ()
-delete el = liftJSWindow $ \w -> do
+delete el = liftJSWindow  (\w -> do
     JS.runFunction w $ ffi "$(%1).detach()" el
-    Foreign.destroy $ toJSObject el
+    Foreign.destroy $ toJSObject el)
 
 -- | Remove all child elements.
 clearChildren :: Element -> UI ()
@@ -272,6 +275,9 @@ newtype UI a = UI { unUI :: Monad.RWST Window [Dynamic ()] () Dynamic a }
 liftJSWindow :: (JS.Window -> IO a) -> UI a
 liftJSWindow f = askWindow >>= liftIO . f . jsWindow
 
+liftJSWindowDyn :: (JS.Window -> E.Dynamic a) -> UI a
+liftJSWindowDyn f = askWindow >>= ui . f . jsWindow
+
 instance Functor UI where
     fmap f = UI . fmap f . unUI
 
@@ -307,8 +313,6 @@ askWindow = UI Monad.ask
 liftIOLater :: Dynamic () -> UI ()
 liftIOLater x = UI $ Monad.tell [x]
 
-registerFin :: IO () -> Dynamic ()
-registerFin x = State.modify (x:)
 
 {-----------------------------------------------------------------------------
     FFI
@@ -342,9 +346,10 @@ flushCallBuffer = liftJSWindow $ \w -> JS.flushCallBuffer w
 --
 -- FIXME: At the moment, the function is not garbage collected.
 ffiExport :: JS.IsHandler a => a -> UI JSObject
-ffiExport fun = liftJSWindow $ \w -> do
-    handlerPtr <- JS.exportHandler w fun
-    Foreign.addReachable (JS.root w) handlerPtr
+ffiExport fun = liftJSWindowDyn $ \w -> do
+    handlerPtr <- liftIO$ JS.exportHandler w fun
+    liftIO$ Foreign.addReachable (JS.root w) handlerPtr
+    E.registerDynamic (Foreign.destroy handlerPtr)
     return handlerPtr
 
 -- | Print a message on the client console if the client has debugging enabled.

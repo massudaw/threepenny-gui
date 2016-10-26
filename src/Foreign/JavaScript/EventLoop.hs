@@ -75,8 +75,8 @@ eventLoop init comm = do
     disconnect <- newTVarIO $ return ()
     let onDisconnect m = atomically $ writeTVar disconnect m
 
-    let w = w0 { runEval        = (\i -> run  $ fmap RunEval i)
-               , callEval       = (\i -> call $ fmap CallEval i)
+    let w = w0 { runEval        = run  . fmap RunEval
+               , callEval       = call . fmap CallEval
                , debug        = debug
                , timestamp    = run (return Timestamp)
                , onDisconnect = onDisconnect
@@ -108,7 +108,7 @@ eventLoop init comm = do
                 writeTVar calling True
                 return (ref,msg)
             msg <- msgio
-            atomically $ writeServer comm msg
+            traverse (\msg-> atomically $ writeServer comm msg) (notEmptyMsg msg)
             atomically $ do
                 writeTVar calling False
                 case ref of
@@ -119,17 +119,16 @@ eventLoop init comm = do
 
     -- Receive events from client and handle them in order.
     let handleEvents = do
-            i<-init w
-            E.finally (forever $ do
+            init w
+            forever $ do
                 e <- atomically $ do
                     writeTVar handling True
                     readTQueue events
                 handleEvent w e
                 rebug
-                atomically $ writeTVar handling False) (void i)
-            return undefined
+                atomically $ writeTVar handling False
 
-    -- Foreign.addFinalizer (wRoot w) $ putStrLn "wRoot garbage collected."
+    Foreign.addFinalizer (wRoot w) $ putStrLn "wRoot garbage collected."
     Foreign.withRemotePtr (wRoot w) $ \_ _ -> do    -- keep root alive
         E.finally
             (foldr1 race_ [multiplexer, handleEvents, handleCalls])

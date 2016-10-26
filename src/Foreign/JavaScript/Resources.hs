@@ -5,12 +5,12 @@ import           Data.Text                          (Text)
 import qualified Data.Text                  as Text
 import           Foreign.JavaScript.Include
 
-
+dict =  "CallEval tag contents Haskell deRefStablePtr append imposeStablePtr create bind newEvent ping pong RunEval text prop style attr class name"
 jsDriverCode :: Text
 jsDriverCode = Text.unlines $ map Text.pack
     [ [include|js/lib/jquery.js|]
     , [include|js/lib/jquery-cookie.js|]
-    , "var Haskell = {};"
+    , "var Haskell = {};dict = \""++ dict++ "\";"
     , [include|js/comm.js|]
     , [include|js/ffi.js|]
     , [include|js/lib.js|]

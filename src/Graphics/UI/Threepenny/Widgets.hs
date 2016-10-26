@@ -52,7 +52,7 @@ entry bValue = do -- single text entry
         unions [True <$ UI.focus input, False <$ UI.blur input]
 
     window <- askWindow
-    liftIOLater $ onChange bValue $ \s -> fmap fst $ runDynamic $ runUI window $ do
+    liftIOLater $ onChangeDyn bValue $ \s ->  runUI window $ do
         editing <- liftIO $ currentValue bEditing
         when (not editing) $ void $ element input # set value s
 
