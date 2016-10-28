@@ -41,6 +41,7 @@ httpComm :: Config -> (Comm -> IO ()) -> IO ()
 httpComm Config{..} worker = do
     env <- getEnvironment
     let portEnv = Safe.readMay =<< Prelude.lookup "PORT" env
+    let dictEnv = Prelude.lookup "DICT_ZLIB" env
     let addrEnv = fmap BS.pack $ Prelude.lookup "ADDR" env
     let porSSLEnv = Safe.readMay =<<  Prelude.lookup "PORT_SSL" env
     let addrSSLEnv = fmap BS.pack $ Prelude.lookup "ADDR_SSL" env
@@ -58,21 +59,21 @@ httpComm Config{..} worker = do
                $ Snap.defaultConfig
     print config
     Snap.httpServe config . route $
-        routeResources jsCustomHTML jsStatic
-        ++ routeWebsockets worker
+        routeResources dictEnv jsCustomHTML jsStatic
+        ++ routeWebsockets dictEnv worker
 
 -- | Route the communication between JavaScript and the server
-routeWebsockets :: (Comm -> IO void) -> Routes
-routeWebsockets worker = [("websocket", response)]
+routeWebsockets :: Maybe String -> (Comm -> IO void) -> Routes
+routeWebsockets dict worker = [("websocket", response)]
     where
     response = WS.runWebSocketsSnap $ \ws -> void $ do
-        comm <- communicationFromWebSocket ws
+        comm <- communicationFromWebSocket dict ws
         worker comm
         -- error "Foreign.JavaScript: unreachable code path."
 
 -- | Create 'Comm' channel from WebSocket request.
-communicationFromWebSocket :: WS.PendingConnection -> IO Comm
-communicationFromWebSocket request = do
+communicationFromWebSocket :: Maybe String -> WS.PendingConnection -> IO Comm
+communicationFromWebSocket dict request = do
     connection <- WS.acceptRequest request
     commIn     <- STM.newTQueueIO   -- outgoing communication
     commOut    <- STM.newTQueueIO   -- incoming communication
@@ -80,19 +81,22 @@ communicationFromWebSocket request = do
     -- write data to browser
     --
     let
-      compress  = GZip.compressWith (GZip.defaultCompressParams {GZip.compressDictionary = Just $ BS.pack dict , GZip.compressLevel = GZip.BestSpeed})
-      decompress = GZip.decompressWith (GZip.defaultDecompressParams {GZip.decompressDictionary = Just $ BS.pack dict})
+      compress  dict = GZip.compressWith (GZip.defaultCompressParams {GZip.compressDictionary = Just $ BS.pack dict , GZip.compressLevel = GZip.BestSpeed})
+      decompress dict = GZip.decompressWith (GZip.defaultDecompressParams {GZip.decompressDictionary = Just $ BS.pack dict})
 
       sendData = forever $ do
             x <- atomically $ STM.readTQueue commOut
             -- see note [ServerMsg strictness]
-            (WS.sendBinaryData connection . compress . JSON.encode $ x) `E.catch` (\e -> print ("sendfailed",e :: E.SomeException))
+            let message =  JSON.encode $ x
+            (do
+              LBS.appendFile "sendData" message
+              WS.sendBinaryData connection . maybe id compress dict  $ message ) `E.catch` (\e -> print ("sendfailed",e :: E.SomeException))
 
     -- read data from browser
     let readData = forever $ E.catchJust (\e -> if not (isConnectionClosed e) then Just e else Nothing) (do
             input <- WS.receiveData connection
-            case decompress input of
-                "ping" -> (WS.sendBinaryData connection .compress . LBS.pack $ "pong") `E.catch` (\e -> print ("send failed",e :: E.SomeException))
+            case (maybe id decompress dict ) input of
+                "ping" -> (WS.sendBinaryData connection . (maybe id compress dict). LBS.pack $ "pong") `E.catch` (\e -> print ("send failed",e :: E.SomeException))
                 "quit" -> E.throw WS.ConnectionClosed
                 input  -> case JSON.decode  input of
                     Just x   -> atomically $ STM.writeTQueue commIn x
@@ -120,12 +124,12 @@ communicationFromWebSocket request = do
 ------------------------------------------------------------------------------}
 type Routes = [(ByteString, Snap ())]
 
-routeResources :: Maybe FilePath -> Maybe FilePath -> Routes
-routeResources customHTML staticDir =
+routeResources :: Maybe String -> Maybe FilePath -> Maybe FilePath -> Routes
+routeResources dict customHTML staticDir =
     fixHandlers noCache $
         static ++
         [("/"            , root)
-        ,("/haskell.js"  , writeTextMime jsDriverCode  "application/javascript")
+        ,("/haskell.js"  , writeTextMime (jsDriverCode  dict) "application/javascript")
         ,("/haskell.css" , writeTextMime cssDriverCode "text/css")
         ]
     where

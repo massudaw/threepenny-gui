@@ -24,8 +24,10 @@ Haskell.createWebSocket = function (url0, receive) {
 
   // Send ping message in regular intervals.
   // We expect pong messages in return to keep the connection alive.
+  compress = function (i) { return dict == null  ? i : pako.deflate(i,{dictionary:dict})}
+  decompress = function (i) { return dict == null ? i : pako.inflate(i,{to:'string',dictionary:dict})}
   var ping = function () {
-    ws.send(pako.deflate("ping",{dictionary:dict}));
+    ws.send(compress("ping"));
     //ws.send("ping");
     window.setTimeout(ping,2000);
   };
@@ -37,12 +39,12 @@ Haskell.createWebSocket = function (url0, receive) {
       var myfile = new FileReader()
       myfile.addEventListener('loadend',function(e){
       // Haskell.log("WebSocket message: %o",msg);
-      var data = pako.inflate(e.srcElement.result,{to:'string',dictionary:dict});
+      var data = decompress(e.srcElement.result); 
       if (data !== "pong") {
         receive(JSON.parse(data));
       }
       })
-      myfile.readAsBinaryString(msg.data);
+      myfile.readAsArrayBuffer(msg.data);
     };
     ws.onclose = function (e) {
       Haskell.log("WebSocket closed: %o", e);
@@ -54,8 +56,7 @@ Haskell.createWebSocket = function (url0, receive) {
   
   // Send a JSON message to the server
   that.send = function (json) {
-    ws.send(pako.deflate(JSON.stringify(json),{dictionary:dict}));
-    //ws.send(JSON.stringify(json));
+    ws.send(compress(JSON.stringify(json)));
   };
   
   return that;
