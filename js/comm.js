@@ -26,9 +26,11 @@ Haskell.createWebSocket = function (url0, receive) {
   // We expect pong messages in return to keep the connection alive.
   compress = function (i) { return dict == null  ? i : pako.deflate(i,{dictionary:dict})}
   decompress = function (i) { return dict == null ? i : pako.inflate(i,{to:'string',dictionary:dict})}
+  var received = false;
   var ping = function () {
-    ws.send(compress("ping"));
-    //ws.send("ping");
+    
+    if (received) 
+      ws.send(compress("ping"));
     window.setTimeout(ping,2000);
   };
   
@@ -36,6 +38,7 @@ Haskell.createWebSocket = function (url0, receive) {
   ws.onopen = function (e) {
     ping();
     ws.onmessage = function (msg) {
+      received = true;
       var myfile = new FileReader()
       myfile.addEventListener('loadend',function(e){
       // Haskell.log("WebSocket message: %o",msg);

@@ -84,13 +84,11 @@ communicationFromWebSocket dict request = do
       compress  dict = GZip.compressWith (GZip.defaultCompressParams {GZip.compressDictionary = Just $ BS.pack dict , GZip.compressLevel = GZip.BestSpeed})
       decompress dict = GZip.decompressWith (GZip.defaultDecompressParams {GZip.decompressDictionary = Just $ BS.pack dict})
 
-      sendData = forever $ do
+      sendData = forever $ (do
             x <- atomically $ STM.readTQueue commOut
             -- see note [ServerMsg strictness]
             let message =  JSON.encode $ x
-            (do
-              LBS.appendFile "sendData" message
-              WS.sendBinaryData connection . maybe id compress dict  $ message ) `E.catch` (\e -> print ("sendfailed",e :: E.SomeException))
+            WS.sendBinaryData connection . maybe id compress dict  $ message ) `E.catch` (\e -> print ("sendfailed",e :: E.SomeException))
 
     -- read data from browser
     let readData = forever $ E.catchJust (\e -> if not (isConnectionClosed e) then Just e else Nothing) (do
@@ -107,7 +105,7 @@ communicationFromWebSocket dict request = do
         isConnectionClosed  e= isJust  $ (E.fromException e :: Maybe WS.ConnectionException)
 
     let manageConnection = do
-            withAsync sendData $ \_ -> do
+         withAsync sendData $ \_ -> do
             Left e <- waitCatch =<< async readData
             atomically $ STM.writeTQueue commIn $
                 JSON.object [ "tag" .= ("Quit" :: Text) ] -- write Quit event
