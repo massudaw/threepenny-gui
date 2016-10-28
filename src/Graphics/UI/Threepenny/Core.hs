@@ -31,7 +31,7 @@ module Graphics.UI.Threepenny.Core (
 
     -- * Events
     -- | For a list of predefined events, see "Graphics.UI.Threepenny.Events".
-    EventData, domEvent, unsafeFromJSON, disconnect, on, onEvent, onChanges, mapEventDyn,
+    EventData, domEvent, unsafeFromJSON, disconnect, on, onEvent, onChanges, unsafeMapUI,mapEventUI ,
     module Reactive.Threepenny,
 
     -- * Attributes
@@ -250,6 +250,10 @@ onChanges :: Behavior a -> (a -> UI void) -> UI ()
 onChanges b f = do
     window <- askWindow
     ui $ Reactive.onChangeDyn b (void . runUI window . f)
+
+unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w ->  fmap fst $ runDynamic $ runUI w (f a))
+
+mapEventUI el f e =  ui $ fmap fst <$> (mapEventDyn (\a -> liftIO (getWindow el) >>= (\w -> runUI w (f a))) e )
 
 
 

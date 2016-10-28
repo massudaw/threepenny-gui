@@ -16,6 +16,7 @@ import           Data.Text
 import qualified Safe                       as Safe
 import           System.Environment
 import           System.FilePath
+import Data.Maybe (isJust)
 
 -- import web libraries
 import           Data.Aeson                             ((.=))
@@ -26,6 +27,7 @@ import           Snap.Core
 import qualified Snap.Http.Server              as Snap
 import           Snap.Util.FileServe
 import qualified Codec.Compression.Zlib as GZip
+import Data.String (fromString)
 
 -- import internal modules
 import Foreign.JavaScript.Resources
@@ -40,12 +42,21 @@ httpComm Config{..} worker = do
     env <- getEnvironment
     let portEnv = Safe.readMay =<< Prelude.lookup "PORT" env
     let addrEnv = fmap BS.pack $ Prelude.lookup "ADDR" env
-
-    let config = Snap.setPort      (maybe defaultPort id (jsPort `mplus` portEnv))
-               $ Snap.setBind      (maybe defaultAddr id (jsAddr `mplus` addrEnv))
+    let porSSLEnv = Safe.readMay =<<  Prelude.lookup "PORT_SSL" env
+    let addrSSLEnv = fmap BS.pack $ Prelude.lookup "ADDR_SSL" env
+    let keySSLEnv = fmap fromString $ Prelude.lookup "KEY_SSL" env
+    let certSSLEnv = fmap fromString $ Prelude.lookup "CERT_SSL" env
+    let config = maybe id Snap.setPort (jsPort `mplus` portEnv)
+               $ maybe id Snap.setBind (jsAddr `mplus` addrEnv)
+               $ maybe id Snap.setSSLBind addrSSLEnv
+               $ maybe id Snap.setSSLPort porSSLEnv
+               $ maybe id Snap.setSSLKey keySSLEnv
+               $ maybe id Snap.setSSLCert certSSLEnv
+               $ maybe id (\_ -> Snap.setSSLChainCert False ) certSSLEnv
                $ Snap.setErrorLog  (Snap.ConfigIoLog jsLog)
                $ Snap.setAccessLog (Snap.ConfigIoLog jsLog)
                $ Snap.defaultConfig
+    print config
     Snap.httpServe config . route $
         routeResources jsCustomHTML jsStatic
         ++ routeWebsockets worker
@@ -69,24 +80,27 @@ communicationFromWebSocket request = do
     -- write data to browser
     --
     let
-      compress = GZip.compressWith (GZip.defaultCompressParams {GZip.compressDictionary = Just $ BS.pack dict})
+      compress  = GZip.compressWith (GZip.defaultCompressParams {GZip.compressDictionary = Just $ BS.pack dict , GZip.compressLevel = GZip.BestSpeed})
       decompress = GZip.decompressWith (GZip.defaultDecompressParams {GZip.decompressDictionary = Just $ BS.pack dict})
+
       sendData = forever $ do
             x <- atomically $ STM.readTQueue commOut
             -- see note [ServerMsg strictness]
-            WS.sendBinaryData connection . compress . JSON.encode $ x
+            (WS.sendBinaryData connection . compress . JSON.encode $ x) `E.catch` (\e -> print ("sendfailed",e :: E.SomeException))
 
     -- read data from browser
-    let readData = forever $ do
+    let readData = forever $ E.catchJust (\e -> if not (isConnectionClosed e) then Just e else Nothing) (do
             input <- WS.receiveData connection
             case decompress input of
-                "ping" -> WS.sendBinaryData connection .compress . LBS.pack $ "pong"
+                "ping" -> (WS.sendBinaryData connection .compress . LBS.pack $ "pong") `E.catch` (\e -> print ("send failed",e :: E.SomeException))
                 "quit" -> E.throw WS.ConnectionClosed
                 input  -> case JSON.decode  input of
                     Just x   -> atomically $ STM.writeTQueue commIn x
                     Nothing  -> error $
                         "Foreign.JavaScript: Couldn't parse JSON input"
-                        ++ show input
+                        ++ show input) (\e -> print ("receive failed" , e :: E.SomeException))
+
+        isConnectionClosed  e= isJust  $ (E.fromException e :: Maybe WS.ConnectionException)
 
     let manageConnection = do
             withAsync sendData $ \_ -> do
@@ -96,7 +110,7 @@ communicationFromWebSocket request = do
             E.throw e
 
     thread <- forkFinally manageConnection
-        (\_ -> WS.sendClose connection .compress $ LBS.pack "close")
+        (\_ -> WS.sendClose connection $ LBS.pack "close")
     let commClose = killThread thread
 
     return $ Comm {..}

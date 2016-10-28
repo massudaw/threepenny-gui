@@ -33,9 +33,6 @@ onChangeE el = unsafeMapUI el (const $ get value el) (domEvent "onchange" el)
 onChangeEUI :: Element -> UI (Event String)
 onChangeEUI el = mapEventUI el (const $ get value el) (domEvent "onchange" el)
 
-unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w ->  fmap fst $ runDynamic $ runUI w (f a))
-mapEventUI el f e =  ui $ fmap fst <$> (mapEventDyn (\a -> liftIO (getWindow el) >>= (\w -> runUI w (f a))) e )
-
 -- | Event that occurs when the /user/ changes the selection of a @<select>@ element.
 selectionChange :: Element -> Event (Maybe Int)
 selectionChange el = unsafeMapUI el ((const $ get selection el)) (click el)
