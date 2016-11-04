@@ -35,19 +35,9 @@ type Map = Map.HashMap
 -- Turn evaluation action into pulse that caches the value.
 cacheEval :: EvalP (Maybe a) -> Build (Pulse a)
 cacheEval e = do
-    key <- Vault.newKey
     return $ Pulse
         { addHandlerP = \_ -> return (return ())
-        , evalP       = do
-            vault <- Monad.get
-            case Vault.lookup key vault of
-                Just a  -> return a
-                Nothing -> do
-                    a <- e
-                    Monad.put $ Vault.insert key a vault
-                    return a
-        }
-{-# INLINE cacheEval #-}
+        , evalP       = e}
 
 -- Add a dependency to a pulse, for the sake of keeping track of dependencies.
 dependOn :: Pulse a -> Pulse b -> Pulse a
@@ -80,15 +70,14 @@ addHandlerRef handlersRef ((uid,DoIO),m) = do
     Interface to the outside world.
 ------------------------------------------------------------------------------}
 -- | Create a new pulse and a function to trigger it.
-newPulse :: Build (Pulse a, a -> IO ())
+newPulse :: Build (Pulse a, a -> IO (),IO())
 newPulse = do
     key         <- Vault.newKey
     handlersRef <- newIORef (Map.empty,Map.empty)      -- map of handlers
 
     let
         -- add handler to map
-        addHandlerP = addHandlerRef handlersRef
-        {-# INLINE addHandlerP #-}
+        addHandlerP  = addHandlerRef handlersRef
 
         -- evaluate all handlers attached to this input pulse
         fireP a = do
@@ -102,7 +91,11 @@ newPulse = do
 
         evalP = join . Vault.lookup key <$> Monad.get
 
-    return (Pulse {..}, fireP)
+
+        cleanP = do
+          writeIORef handlersRef (Map.empty , Map.empty)
+          return ()
+    return (Pulse {..}, fireP,cleanP)
 {-# INLINE newPulse #-}
 
 -- | Register a handler to be executed whenever a pulse occurs.
@@ -217,7 +210,7 @@ applyL l1 l2 = Latch { readL = readL l1 <*> readL l2 }
 ------------------------------------------------------------------------------}
 test :: IO (Int -> IO ())
 test = do
-    (p1, fire) <- newPulse
+    (p1, fire,_) <- newPulse
     p2     <- mapP (+) p1
     (l1,_,_) <- accumL 0 p2
     let l2 =  mapL const l1
@@ -227,7 +220,7 @@ test = do
 
 test_recursion1 :: IO (IO ())
 test_recursion1 = mdo
-    (p1, fire) <- newPulse
+    (p1, fire,_) <- newPulse
     p2      <- applyP l2 p1
     p3      <- mapP (const (+1)) p2
     ~(l1,_,_) <- accumL (0::Int) p3

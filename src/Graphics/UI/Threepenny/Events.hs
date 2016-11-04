@@ -3,63 +3,62 @@ module Graphics.UI.Threepenny.Events (
     -- | Events on DOM elements.
 
     -- * Convenience events
-    onChangeE,onChangeEUI,valueChange,valueChangeUI, selectionChange,selectionChangeUI, checkedChange,checkedChangeUI,
+    onChangeE,valueChange, selectionChange, checkedChange,
 
     -- * Standard DOM events
-    click, mousemove, mousedown, mouseup, hover, leave,
+    click, mousewheel,mousemove, mousedown, mouseup, hover, leave,
     focus, blur,
-    KeyCode, keyup, keydown,
+    KeyCode, keyup, keydown,keydownFilter
     ) where
 
 import Graphics.UI.Threepenny.Attributes
 import Graphics.UI.Threepenny.Core
-import Debug.Trace
 
-silence = fmap (const ())
+
 
 {-----------------------------------------------------------------------------
     Events
 ------------------------------------------------------------------------------}
 -- | Event that occurs when the /user/ changes the value of the input element.
-valueChange :: Element -> Event String
-valueChange el = unsafeMapUI el (const $ get value el) (domEvent "keydown" el)
 
-valueChangeUI :: Element -> UI (Event String)
-valueChangeUI el = mapEventUI el (const $ get value el) (domEvent "keydown" el)
+valueChange :: Element -> UI (Event String)
+valueChange el = domEventH "keydown" el (el # get valueFFI)
 
-onChangeE :: Element -> Event String
-onChangeE el = unsafeMapUI el (const $ get value el) (domEvent "onchange" el)
 
-onChangeEUI :: Element -> UI (Event String)
-onChangeEUI el = mapEventUI el (const $ get value el) (domEvent "onchange" el)
+onChangeE :: Element -> UI (Event String)
+onChangeE el = domEventH "change" el (el # get valueFFI )
 
 -- | Event that occurs when the /user/ changes the selection of a @<select>@ element.
-selectionChange :: Element -> Event (Maybe Int)
-selectionChange el = unsafeMapUI el ((const $ get selection el)) (click el)
 
 
-selectionChangeUI :: Element -> UI (Event (Maybe Int))
-selectionChangeUI el = mapEventUI el (const $ get selection el) (click el)
+selectionChange :: Element -> UI (Event Int)
+selectionChange el = domEventH "change" el (ffi "this.selectedIndex")
 
 -- | Event that occurs when the /user/ changes the checked status of an input
 -- element of type checkbox.
-checkedChangeUI :: Element -> UI (Event Bool)
-checkedChangeUI el = mapEventUI el (const $ get checked el) (click el)
+checkedChange :: Element -> UI (Event Bool)
+checkedChange el =  domEventH "change" el (ffi "this.checked")
 
-checkedChange :: Element -> Event Bool
-checkedChange el = unsafeMapUI el (const $ get checked el) (click el)
+mousewheel :: Element -> UI (Event Int)
+mousewheel el =  fmap (`div` 120) <$> domEventH  "wheel" el  (ffi "%1.preventDefault();%1.originalEvent.wheelDelta" event)
 
 {-----------------------------------------------------------------------------
     DOM Events
 ------------------------------------------------------------------------------}
 -- | Mouse click.
-click :: Element -> Event ()
-click = silence . domEvent "click"
 
+
+click :: Element -> UI (Event ())
+click el = domEventH "click" el (ffi "")
 
 -- | Mouse enters an element.
-hover :: Element -> Event ()
-hover = silence . domEvent "mouseenter"
+hover :: Element -> UI (Event ())
+hover el = domEventH "mouseenter" el (ffi "")
+
+-- | Mouse leaving an element.
+leave :: Element -> UI (Event ())
+leave el = domEventH "mouseleave" el (ffi "")
+
 
 -- | Event that periodically occurs while the mouse is moving over an element.
 --
@@ -69,42 +68,42 @@ hover = silence . domEvent "mouseenter"
 -- Note: The @<body>@ element responds to mouse move events,
 -- but only in the area occupied by actual content,
 -- not the whole browser window.
-mousemove :: Element -> Event (Int,Int)
-mousemove = fmap readCoordinates . domEvent "mousemove"
 
-readCoordinates :: EventData -> (Int,Int)
-readCoordinates json = (x,y)
-    where [x,y] = unsafeFromJSON json
+coordinates :: Element -> JSFunction (Int,Int)
+coordinates el = ffi "var offset = $(%2).offset();var x  = %1.pageX - offset.left;var y = %1.pageY - offset.top;[x, y] " event el
+
+mousemove :: Element -> UI (Event (Int,Int))
+mousemove el = domEventH "mousemove" el  (coordinates el)
+
 
 -- | Mouse down event.
 -- The mouse coordinates are relative to the element.
-mousedown :: Element -> Event (Int,Int)
-mousedown = fmap readCoordinates . domEvent "mousedown"
+mousedown :: Element -> UI (Event (Int,Int))
+mousedown el = domEventH "mousedown" el (coordinates el)
 
 -- | Mouse up event.
 -- The mouse coordinates are relative to the element.
-mouseup :: Element -> Event (Int,Int)
-mouseup = fmap readCoordinates . domEvent "mouseup"
-
--- | Mouse leaving an element.
-leave :: Element -> Event ()
-leave = silence . domEvent "mouseleave"
+mouseup :: Element -> UI (Event (Int,Int))
+mouseup el = domEventH "mouseup" el (coordinates el)
 
 -- | Element receives focus.
-focus :: Element -> Event ()
-focus = silence . domEvent "focus"
+focus :: Element -> UI (Event ())
+focus el = domEventH "focus" el (ffi "")
 
 -- | Element loses focus.
-blur :: Element -> Event ()
-blur = silence . domEvent "blur"
+blur :: Element -> UI (Event ())
+blur el = domEventH "blur" el (ffi "")
 
 
-type KeyCode = Int
+type KeyCode = (Int,Bool,Bool,Bool)
 
 -- | Key pressed while element has focus.
-keydown :: Element -> Event KeyCode
-keydown = fmap unsafeFromJSON . domEvent "keydown"
+keydownFilter :: (Int,Bool,Bool,Bool) -> Element -> UI (Event KeyCode)
+keydownFilter arg el = domEventAsync "keydown"  el (ffi "if ( (%2.keyCode === %3[0]) && (%2.shiftKey === %3[1] ) && (%2.altKey === %3[2] ) && (%2.ctrlKey === %3[3]) )  { (%1)([%2.keyCode,%2.shiftKey,%2.altKey,%2.ctrlKey])}" async event arg )
+
+keydown :: Element -> UI (Event KeyCode)
+keydown el = domEventAsync "keydown"  el (ffi "[%1.keyCode,%1.shiftKey,%1.altKey,%1.ctrlKey]" event)
 
 -- | Key released while element has focus.
-keyup :: Element -> Event KeyCode
-keyup   = fmap unsafeFromJSON . domEvent "keyup"
+keyup :: Element -> UI (Event KeyCode)
+keyup   el = domEventH "keyup"  el (ffi "[%1.keyCode,%1.shiftKey,%1.altKey,%1.ctrlKey]" event)

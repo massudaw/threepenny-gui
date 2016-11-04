@@ -10,3 +10,4 @@ runEvalP :: Values -> EvalP a -> IO (a, Values)
 runEvalP pulses m = do
     (a, s) <- runStateT m pulses
     return (a, s)
+{-# INLINE runEvalP #-}

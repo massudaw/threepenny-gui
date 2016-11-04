@@ -16,7 +16,7 @@ module Foreign.JavaScript (
     Window, root,
 
     -- * JavaScript FFI
-    ToJS(..), FromJS, JSFunction, JSObject,
+    ToJS(..), FromJS, JSAsync(..),JSFunction(..),emptyFunction, JSObject,
     FFI, ffi, runFunction, callFunction,
     NewJSObject, unsafeCreateJSObject,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
@@ -32,7 +32,10 @@ import           Foreign.JavaScript.Marshal
 import           Foreign.JavaScript.Server
 import           Foreign.JavaScript.Types
 import           Foreign.RemotePtr            as Foreign
-import Data.List (intercalate)
+import Data.List (any,intercalate)
+import Data.Monoid
+import Data.Maybe (isJust)
+import qualified Data.Foldable as F
 
 {-----------------------------------------------------------------------------
     Server
@@ -55,7 +58,8 @@ serve config init = httpComm config $ eventLoop $ \w -> do
 -- NOTE: The JavaScript function is subject to buffering,
 -- and may not be run immediately. See 'setCallBufferMode'.
 runFunction :: Window -> JSFunction () -> IO ()
-runFunction w f = bufferRunEval w  (toCode f)
+runFunction w f = do
+  bufferRunEval w  (toCode f)
 
 
 -- | Run a JavaScript function that creates a new object.
@@ -73,8 +77,9 @@ unsafeCreateJSObject w f = do
 -- | Call a JavaScript function and wait for the result.
 callFunction :: Window -> JSFunction a -> IO a
 callFunction w f = do
-    flushCallBuffer w -- FIXME: Add the code of f to the buffer as well!
-    resultJS <- callEval w (toCode f)
+    ref <- newEmptyTMVarIO
+    bufferCallEval w ref (toCode f)
+    resultJS <- atomically $ takeTMVar ref
     marshalResult f w resultJS
 
 -- | Export a Haskell function as an event handler.
@@ -109,6 +114,17 @@ setCallBufferMode w@Window{..} new = do
 
 -- | Flush the call buffer,
 -- i.e. send all outstanding JavaScript to the client in one single message.
+flushCallEvalBuffer :: Window -> TMVar JSON.Value -> IO ()
+flushCallEvalBuffer w@Window{..} ref = do
+    code' <- atomically $ do
+        code <- readTVar wCallBuffer
+        writeTVar wCallBuffer return
+        return code
+
+    callEval ref (intercalate ";"  <$> code' [])
+    return ()
+
+
 flushCallBuffer :: Window -> IO ()
 flushCallBuffer w@Window{..} = do
     code' <- atomically $ do
@@ -119,18 +135,42 @@ flushCallBuffer w@Window{..} = do
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
-bufferRunEval :: Window -> IO String -> IO ()
-bufferRunEval w@Window{..} icode = do
+bufferCallEval :: Window -> TMVar JSON.Value -> IO String -> IO ()
+bufferCallEval w@Window{..} ref icode = do
   action <- atomically $ do
         mode <- readTVar wCallBufferMode
-        case mode of
-            BufferRun -> do
+        let buffer = do
                 msg <- readTVar wCallBuffer
                 writeTVar wCallBuffer (\i -> do
                   code <- icode
                   msg (code :i) )
                 return Nothing
-            NoBuffering -> do
+
+        case mode of
+            BufferAll -> buffer
+            BufferCall -> buffer
+            i -> do
+              return $ Just icode
+  case action of
+    Nothing -> flushCallEvalBuffer w ref
+    Just i -> callEval ref i
+
+-- Schedule a piece of JavaScript code to be run with `runEval`,
+-- depending on the buffering mode
+bufferRunEval :: Window -> IO String -> IO ()
+bufferRunEval w@Window{..} icode = do
+  action <- atomically $ do
+        mode <- readTVar wCallBufferMode
+        let buffer = do
+                msg <- readTVar wCallBuffer
+                writeTVar wCallBuffer (\i -> do
+                  code <- icode
+                  msg (code :i) )
+                return Nothing
+        case mode of
+            BufferAll ->  buffer
+            BufferRun -> buffer
+            i-> do
               return $ Just icode
   case action of
     Nothing -> return ()

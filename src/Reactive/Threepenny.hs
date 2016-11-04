@@ -50,12 +50,12 @@ import Control.Monad (void,(>=>))
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Data.IORef
-import Control.Concurrent(forkIO)
 import qualified Data.Map as Map
 
 import           Reactive.Threepenny.Memo       as Memo
 import qualified Reactive.Threepenny.PulseLatch as Prim
 import qualified Control.Monad.Trans.State.Strict as State
+import System.IO.Unsafe
 
 type Pulse = Prim.Pulse
 type Latch = Prim.Latch
@@ -112,9 +112,9 @@ type Handler a = a -> IO ()
 
 -- | Create a new event.
 -- Also returns a function that triggers an event occurrence.
-newEvent :: MonadIO m => m (Event a, Handler a)
-newEvent = liftIO$ do
-    (p, fire) <- Prim.newPulse
+newEvent :: Dynamic (Event a, Handler a)
+newEvent = do
+    (p, fire,fin) <- liftIO$ Prim.newPulse
     return (E $ fromPure p, fire)
 
 
@@ -124,16 +124,16 @@ newEvent = liftIO$ do
 -- exactly once when the event is first "brought to life",
 -- e.g. when an event handler is registered to it.
 newEventsNamed :: Ord name
-    => Handler (name, Event a, Handler a)   -- ^ Initialization procedure.
-    -> IO (name -> Event a)                 -- ^ Series of events.
+   => Handler (name, Event a, Handler a )   -- ^ Initialization procedure.
+    -> IO (name -> IO(Event a))                 -- ^ Series of events.
 newEventsNamed init = do
     eventsRef <- newIORef Map.empty
-    return $ \name -> E $ memoize $ do
+    return $ \name  -> fmap E $ memoize $ do
         events <- readIORef eventsRef
         case Map.lookup name events of
             Just p  -> return p
             Nothing -> do
-                (p, fire) <- Prim.newPulse
+                (p, fire,fin) <- Prim.newPulse
                 writeIORef eventsRef $ Map.insert name p events
                 init (name, E $ fromPure p, fire)
                 return p
@@ -168,12 +168,14 @@ onChange (B l e) h = do
     register e (\_ -> h =<< Prim.readLatch l)
 
 onChangeDyn :: Behavior a -> (a -> Dynamic ()) -> Dynamic ()
-onChangeDyn (B  l e ) hf = mdo
+onChangeDyn (B  l e ) hf = do
     -- This works because latches are updated before the handlers are being called.
     (ev,h)<-newEvent
-    register ((,) <$> bv <@> e) (\(~(fin,_))-> sequence fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))-- (\_ -> h =<< Prim.readLatch l)
-    bv <- stepper [] ev
-    registerDynamic ( currentValue bv >>= sequence_ )
+    bv <- mdo
+      register ((,) <$> bv <@> e) (\(~(fin,_))-> sequence_ fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))
+      bv <- stepper [] ev
+      return bv
+    --registerDynamic ( currentValue bv >>= sequence_ )
     return ()
 
 
@@ -186,10 +188,10 @@ currentValue (B l _) = liftIO $ Prim.readLatch l
     Core Combinators
 ------------------------------------------------------------------------------}
 instance Functor Event where
-    fmap f e = E $ liftMemo1 (Prim.mapP f) (unE e)
+  fmap f e = E $ unsafePerformIO $ liftMemo1 (Prim.mapP f) (unE e)
 
 unsafeMapIO :: (a -> IO b) -> Event a -> Event b
-unsafeMapIO f e = E $ liftMemo1 (Prim.unsafeMapIOP f) (unE e)
+unsafeMapIO f e = E $ unsafePerformIO $ liftMemo1 (Prim.unsafeMapIOP f) (unE e)
 
 -- | Event that never occurs.
 -- Think of it as @never = []@.
@@ -200,7 +202,7 @@ never = E $ fromPure Prim.neverP
 -- Think of it as
 --
 -- > filterJust es = [(time,a) | (time,Just a) <- es]
-filterJust e = E $ liftMemo1 Prim.filterJustP (unE e)
+filterJust e = E $ unsafePerformIO $ liftMemo1 Prim.filterJustP (unE e)
 
 -- | Merge two event streams of the same type.
 -- In case of simultaneous occurrences, the event values are combined
@@ -212,14 +214,14 @@ filterJust e = E $ liftMemo1 Prim.filterJustP (unE e)
 -- >    | timex <  timey = (timex,x)     : unionWith f xs ((timey,y):ys)
 -- >    | timex >  timey = (timey,y)     : unionWith f ((timex,x):xs) ys
 unionWith :: (a -> a -> a) -> Event a -> Event a -> Event a
-unionWith f e1 e2 = E $ liftMemo2 (Prim.unionWithP f) (unE e1) (unE e2)
+unionWith f e1 e2 = E $ unsafePerformIO $ liftMemo2 (Prim.unionWithP f) (unE e1) (unE e2)
 
 -- | Apply a time-varying function to a stream of events.
 -- Think of it as
 --
 -- > apply bf ex = [(time, bf time x) | (time, x) <- ex]
 apply :: Behavior (a -> b) -> Event a -> Event b
-apply  f x        = E $ liftMemo1 (\p -> Prim.applyP (latch f) p) (unE x)
+apply  f x        = E $ unsafePerformIO $ liftMemo1 (\p -> Prim.applyP (latch f) p) (unE x)
 
 infixl 4 <@>, <@
 
@@ -367,11 +369,13 @@ onEventIO e h =   register e (void . h)
 
 onEventDyn
   :: Event a ->  (a -> Dynamic b) -> Dynamic ()
-onEventDyn  e f =  mdo
+onEventDyn  e f =  do
   (efin,hfin) <- newEvent
-  onEventIO ((,) <$> bfin <@>e ) (\ ~(fin,i) -> sequence_ fin >> (hfin  .snd =<< (runDynamic  ( f i) )) )
-  bfin <- stepper [] efin
-  registerDynamic $ sequence_ =<< currentValue bfin
+  bfin <- mdo
+    onEventIO ((,) <$> bfin <@>e ) (\ ~(fin,i) -> sequence_ fin >> (hfin  .snd =<< (runDynamic  ( f i) )) )
+    bfin <- stepper [] efin
+    return bfin
+  -- registerDynamic $ sequence_ =<< currentValue bfin
   return ()
 
 
@@ -426,7 +430,7 @@ pair (T bx ex) (T by ey) = T b e
 
 mapEventDyn ::(a -> Dynamic b) -> Event a -> Dynamic (Event (b,[IO()]) )
 mapEventDyn f x = do
-    (e,h) <- liftIO $ newEvent
+    (e,h) <- newEvent
     onEventIO x (\i -> void $ (runDynamic $ f i)  >>= h)
 
     return  e
@@ -438,7 +442,7 @@ mapEventDyn f x = do
 ------------------------------------------------------------------------------}
 test :: Dynamic (Int -> IO ())
 test = do
-  (e1,fire) <- lift newEvent
+  (e1,fire) <- newEvent
   e2 <- accumE 0 $ (+) <$> e1
   _  <- register e2 print
 
@@ -446,7 +450,7 @@ test = do
 
 test_recursion1 :: Dynamic (IO ())
 test_recursion1 = mdo
-    (e1, fire) <- lift newEvent
+    (e1, fire) <- newEvent
     let e2 :: Event Int
         e2 = apply (const <$> b) e1
     b  <- accumB 0 $ (+1) <$ e2

@@ -24,7 +24,7 @@ main = do
     startGUI defaultConfig
         { jsCustomHTML = Just "chat.html"
         , jsStatic     = Just static
-        } $ setup messages
+        } ( setup messages) (return 1) (\_ -> return ())
 
 type Message = (UTCTime, String, String)
 
@@ -33,7 +33,7 @@ setup globalMsgs window = do
     msgs <- liftIO $ Chan.dupChan globalMsgs
 
     return window # set title "Chat"
-    
+
     (nickRef, nickname) <- mkNickname
     messageArea         <- mkMessageArea msgs nickRef
 
@@ -44,10 +44,11 @@ setup globalMsgs window = do
         , element nickname
         , element messageArea
         ]
-    
+
     messageReceiver <- liftIO $ forkIO $ receiveMessages window msgs messageArea
 
-    on UI.disconnect window $ const $ liftIO $ do
+    ui$ registerDynamic $ do
+        print "Run disconnect"
         killThread messageReceiver
         now   <- getCurrentTime
         nick  <- readIORef nickRef
@@ -57,7 +58,7 @@ setup globalMsgs window = do
 receiveMessages w msgs messageArea = do
     messages <- Chan.getChanContents msgs
     forM_ messages $ \msg -> do
-        runUI w $ do
+        execDynamic $ runUI w $ do
           element messageArea #+ [mkMessage msg]
           UI.scrollToBottom messageArea
           flushCallBuffer -- make sure that JavaScript functions are executed
@@ -65,7 +66,7 @@ receiveMessages w msgs messageArea = do
 mkMessageArea :: Chan Message -> IORef String -> UI Element
 mkMessageArea msgs nickname = do
     input <- UI.textarea #. "send-textarea"
-    
+
     on UI.sendValue input $ (. trim) $ \content -> do
         element input # set value ""
         when (not (null content)) $ liftIO $ do
@@ -85,7 +86,7 @@ mkNickname = do
                 , element input
                 ]
     UI.setFocus input
-    
+
     nick <- liftIO $ newIORef ""
     on UI.keyup input $ \_ -> liftIO . writeIORef nick . trim =<< get value input
     return (nick,el)

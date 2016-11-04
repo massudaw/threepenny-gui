@@ -18,8 +18,8 @@ Haskell.map = function (fun, array) {
 
 /////////////////////////////////////////////////////////////////////
 // Binding to events
-Haskell.bind = function (el, eventType, fun) {
-  var handlers = clientHandlers(); 
+Haskell.bind = function (el, eventType, fun,code,async_fun) {
+  var handlers = typeof(clientHandlers) == 'undefined' ? null : clientHandlers(); 
   if(eventType === 'livechange') {
     $(el).livechange(300,function(e){
       fun([ $(el).val() ]);
@@ -35,29 +35,13 @@ Haskell.bind = function (el, eventType, fun) {
             ? [e.originalEvent.dataTransfer.getData("dragData")]
             : [] );
     });
-  } else if(eventType.match('mousemove|mousedown|mouseup')) {
-    $(el).bind(eventType, function(e) {
-      var offset = $(this).offset();
-      var x      = e.pageX - offset.left;
-      var y      = e.pageY - offset.top;
-      fun([x, y]);
-    });
-  } else if(eventType.match('keydown|keyup')) {
-    $(el).bind(eventType, function(e) {
-      fun([e.keyCode,e.shiftKey,e.altKey,e.ctrlKey]);
-      return true;
-    });
-  }else if(eventType.match('mousewheel|wheel')) {
-          $(el).bind(eventType,function(e){
-            e.preventDefault();
-            fun(e.originalEvent.wheelDelta);
-            return true;
-          });
-	} else if (handlers[eventType] != null ) {
+	} else if (handlers != null && handlers[eventType] != null ) {
     handlers[eventType](el,eventType,fun);
   } else {
-    $(el).bind(eventType, function(e) {
-      fun(e.which ? [e.which.toString()] : []);
+    $(el).bind(eventType, function(event) {
+      var res = eval(code);
+        if (! async_fun) 
+          fun(res);
       return true;
     });
   }

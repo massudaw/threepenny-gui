@@ -28,13 +28,13 @@ data Timer = Timer
     } deriving (Typeable)
 
 -- | Create a new timer
-timer :: MonadIO m => Int -> m  Timer
-timer time = liftIO$ do
-    tvRunning     <- newTVarIO False
-    tvInterval    <- newTVarIO time
+timer :: Int -> Dynamic  Timer
+timer time = do
+    tvRunning     <- liftIO$ newTVarIO False
+    tvInterval    <- liftIO$ newTVarIO time
     (tTick, fire) <- newEvent
 
-    forkIO $ forever $ do
+    liftIO$ forkIO $ forever $ do
         atomically $ do
             b <- readTVar tvRunning
             when (not b) retry

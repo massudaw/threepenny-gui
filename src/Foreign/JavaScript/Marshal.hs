@@ -1,10 +1,10 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE FlexibleInstances, TypeSynonymInstances, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts,FlexibleInstances, TypeSynonymInstances, ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
 module Foreign.JavaScript.Marshal (
     ToJS(..), FromJS,
-    FFI, JSFunction, toCode, marshalResult, ffi,
-    IsHandler, convertArguments, handle,
+    FFI, JSCode(..),JSAsync(..),JSFunction(..), toCode, marshalResult, ffi,
+    IsHandler, convertArguments, handle,emptyFunction,
 
     NewJSObject, wrapImposeStablePtr,
     ) where
@@ -46,6 +46,8 @@ class ToJS a where
 
 jsCode = return . JSCode
 
+instance ToJS () where render _ = return (JSCode "")
+instance (ToJSON a ,ToJSON b,ToJSON c , ToJSON d) => ToJS (a,b,c,d) where render  =render . JSON.toJSON
 instance ToJS Float      where render   = render . JSON.toJSON
 instance ToJS Double     where render   = render . JSON.toJSON
 instance ToJS Int        where render   = jsCode . show
@@ -64,6 +66,11 @@ instance ToJS HsEvent    where
 instance ToJS JSObject   where
     render x   = apply1 "Haskell.deRefStablePtr(%1)"
                  <$> (render =<< unprotectedGetCoupon x)
+instance ToJS (JSFunction a) where
+   render (JSFunction code _ ) = code
+
+instance ToJS JSCode  where
+  render = return
 
 -- | Show a type in a JSON compatible way.
 showJSON :: ToJSON a => a -> String
@@ -84,17 +91,32 @@ data FromJS' a = FromJS'
 class FromJS a where
     fromJS   :: FromJS' a
 
+newtype JSAsync a = JSAsync (JSFunction a)
+newtype JSSync a = JSSync (JSFunction a)
+
 -- | Marshal a simple type to Haskell.
 simple :: FromJSON a => (JSCode -> JSCode) -> FromJS' a
 simple f =
-    FromJS' { wrapCode = f , marshal = \_ -> fromSuccessIO . JSON.fromJSON }
+  FromJS' { wrapCode = f  , marshal = \_ -> fromSuccessIO . JSON.fromJSON }
     where
     fromSuccessIO (JSON.Success a) = return a
 
 instance FromJS String     where fromJS = simple $ apply1 "%1.toString()"
 instance FromJS T.Text     where fromJS = simple $ apply1 "%1.toString()"
-instance FromJS Int        where fromJS = simple id
+
+instance (FromJSON a ,FromJSON  b,FromJSON  c, FromJSON  d) => FromJS (a,b,c,d)   where fromJS = simple id
+instance (FromJSON a ,FromJSON  b,FromJSON  c) => FromJS (a,b,c)   where fromJS = simple id
+instance (FromJSON a ,FromJSON  b) => FromJS (a,b)   where fromJS = simple id
+
+instance FromJS Int   where fromJS = simple id
+instance FromJSON a => FromJS (Maybe a)  where fromJS = simple $ apply1 "typeof(%1) === 'undefined' ? \"null\" : %1"
+instance FromJS [Int]  where fromJS = simple id
+instance FromJS [Double]  where fromJS = simple id
+instance FromJS [String]  where fromJS = simple id
+instance FromJS [Bool]  where fromJS = simple id
+instance FromJS [Float]  where fromJS = simple id
 instance FromJS Double     where fromJS = simple id
+instance FromJS Bool where fromJS = simple id
 instance FromJS Float      where fromJS = simple id
 instance FromJS JSON.Value where fromJS = simple id
 
@@ -157,6 +179,24 @@ instance (ToJS a, FFI b) => FFI (a -> b) where
         x <- render a
         f (x:xs)
 
+
+instance FromJS a => FFI (JSSync a) where
+  fancy f
+    = JSSync $ JSFunction
+      { code = (apply1 "fun(%1)" . wrapCode js  ) <$> f []
+      , marshalResult = marshal js }
+    where
+      js = fromJS
+
+instance FromJS a => FFI (JSAsync a) where
+  fancy f
+    = JSAsync $ JSFunction
+      { code = (\c -> applyAsync c  (apply1 "function(i){return fun(%1)}" $ (wrapCode js  (JSCode "i")))) <$> f []
+      , marshalResult = marshal js }
+    where
+      js = fromJS
+
+
 instance FromJS b        => FFI (JSFunction b) where
     fancy f   = JSFunction
         { code          = wrapCode b <$> f []
@@ -183,6 +223,7 @@ instance FromJS b        => FFI (JSFunction b) where
 --
 ffi :: FFI a => String -> a
 ffi macro = fancy (return . apply macro)
+
 
 testFFI :: String -> Int -> JSFunction String
 testFFI = ffi "$(%1).prop('checked',%2)"
@@ -219,6 +260,8 @@ convertArguments f =
     "[" ++ intercalate "," (map unJSCode $ convertArgs f 0) ++ "]"
 
 
+emptyFunction  = JSFunction (return $ JSCode "") (\ _ _ -> return ())
+
 {-----------------------------------------------------------------------------
     String utilities
 ------------------------------------------------------------------------------}
@@ -227,6 +270,20 @@ convertArguments f =
 -- The types ensure that the % character has no meaning in the generated output.
 --
 -- > apply "%1 and %2" [x,y] = x ++ " and " ++ y
+applyAsync :: JSCode -> JSCode -> JSCode
+applyAsync (JSCode code ) (JSCode ascode ) = maybe (JSCode code) JSCode $ go code "fun" []
+    where
+
+    go (i:cs) (a:ls) ap
+      | i == a =  case go cs ls  (ap ++ [i]) of
+                      Just v -> Just $  v
+                      Nothing -> ((ap  ++ [i])++ ) <$> go cs "fun" []
+      | otherwise = ((ap ++ [i] ) ++  ) <$> go cs "fun" []
+    go cs [] _ =  Just (ascode ++cs)
+    go [] [] _   =  Just ascode
+
+
+
 apply :: String -> [JSCode] -> JSCode
 apply code args = JSCode $ go code
     where

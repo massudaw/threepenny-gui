@@ -70,6 +70,8 @@ Library
   hs-source-dirs:    src
   exposed-modules:
                      Foreign.JavaScript
+                     Foreign.JavaScript.Marshal
+                     Foreign.JavaScript.Types
                     ,Foreign.RemotePtr
                     ,Graphics.UI.Threepenny
                     ,Graphics.UI.Threepenny.Internal
@@ -89,10 +91,8 @@ Library
   other-modules:
                      Foreign.JavaScript.EventLoop
                     ,Foreign.JavaScript.Include
-                    ,Foreign.JavaScript.Marshal
                     ,Foreign.JavaScript.Resources
                     ,Foreign.JavaScript.Server
-                    ,Foreign.JavaScript.Types
                     ,Reactive.Threepenny.Memo
                     ,Reactive.Threepenny.Monads
                     ,Reactive.Threepenny.PulseLatch
@@ -131,41 +131,6 @@ Library
   else
       build-depends: network                >= 2.3.0  && < 2.6
 
-Executable threepenny-examples-bartab
-    if flag(buildExamples)
-        cpp-options:       -DCABAL
-        build-depends:     base                      >= 4     && < 5
-                          ,threepenny-gui
-                          ,filepath
-    else
-        buildable: False
-    main-is:           BarTab.hs
-    other-modules:     Paths_threepenny_gui, Paths
-    hs-source-dirs:    samples
-
-Executable threepenny-examples-buttons
-    if flag(buildExamples)
-        cpp-options:       -DCABAL
-        build-depends:     base                      >= 4     && < 5
-                          ,threepenny-gui
-                          ,filepath
-    else
-        buildable: False
-    main-is:           Buttons.hs
-    other-modules:     Paths_threepenny_gui, Paths
-    hs-source-dirs:    samples
-
-Executable threepenny-examples-canvas
-    if flag(buildExamples)
-        cpp-options:       -DCABAL
-        build-depends:     base                      >= 4     && < 5
-                          ,filepath
-                          ,threepenny-gui
-    else
-        buildable: False
-    main-is:           Canvas.hs
-    hs-source-dirs:    samples
-
 Executable threepenny-examples-chat
     if flag(buildExamples)
         cpp-options:       -DCABAL
@@ -174,54 +139,11 @@ Executable threepenny-examples-chat
                           ,transformers
                           ,filepath
                           ,time
+        ghc-options: -O2 -fprof-auto -rtsopts -threaded
     else
         buildable: False
     main-is:           Chat.hs
     other-modules:     Paths_threepenny_gui, Paths, Data.List.Extra
     hs-source-dirs:    samples
 
-Executable threepenny-examples-crud
-    if flag(buildExamples)
-        cpp-options:       -DCABAL
-        build-depends:     base                      >= 4     && < 5
-                          ,containers
-                          ,threepenny-gui
-    else
-        buildable: False
-    main-is:           CRUD.hs
-    hs-source-dirs:    samples
 
-Executable threepenny-examples-currencyconverter
-    if flag(buildExamples)
-        cpp-options:       -DCABAL
-        build-depends:     base                      >= 4     && < 5
-                          ,threepenny-gui
-                          ,safe
-    else
-        buildable: False
-    main-is:           CurrencyConverter.hs
-    hs-source-dirs:    samples
-
-Executable threepenny-examples-dragndropexample
-    if flag(buildExamples)
-        cpp-options:       -DCABAL
-        build-depends:     base                      >= 4     && < 5
-                          ,threepenny-gui
-                          ,filepath
-    else
-        buildable: False
-    main-is:           DragNDropExample.hs
-    other-modules:     Paths_threepenny_gui, Paths
-    hs-source-dirs:    samples
-
-Executable threepenny-examples-drummachine
-    if flag(buildExamples)
-        cpp-options:       -DCABAL
-        build-depends:     base                      >= 4     && < 5
-                          ,threepenny-gui
-                          ,filepath
-    else
-        buildable: False
-    main-is:           DrumMachine.hs
-    other-modules:     Paths_threepenny_gui, Paths
-    hs-source-dirs:    samples

@@ -15,8 +15,10 @@ import           Control.Monad
 import qualified Data.Aeson               as JSON
 import           Data.IORef
 import qualified Data.Text                as T
+import Data.List (intercalate)
 import qualified System.Mem
 
+import Control.Concurrent
 import Foreign.RemotePtr        as Foreign
 import Foreign.JavaScript.Types
 
@@ -64,10 +66,10 @@ eventLoop init comm = do
     w0 <- newPartialWindow
     let run msg = do
             atomically $ writeTQueue calls (Nothing , msg)
-        call msg = do
-            ref <- newEmptyTMVarIO
+        call ref  msg = do
+            --ref <- newEmptyTMVarIO
             atomically $ writeTQueue calls (Just ref, msg)
-            atomically $ takeTMVar ref
+            --atomically $ takeTMVar ref
         debug    s = do
             atomically $ writeServer comm $ Debug s
 
@@ -76,7 +78,7 @@ eventLoop init comm = do
     let onDisconnect m = atomically $ writeTVar disconnect m
 
     let w = w0 { runEval        = run  . fmap RunEval
-               , callEval       = call . fmap CallEval
+               , callEval       = (\ref -> call ref . fmap CallEval)
                , debug        = debug
                , timestamp    = run (return Timestamp)
                , onDisconnect = onDisconnect
@@ -101,6 +103,9 @@ eventLoop init comm = do
                     Quit      -> Just <$> readTVar disconnect
             m
 
+    let flushTimeout = forever ( do
+            threadDelay (300*1000)
+            flushCallBuffer w)
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             (ref,msgio) <- atomically $ do
@@ -130,7 +135,7 @@ eventLoop init comm = do
 
     Foreign.withRemotePtr (wRoot w) $ \_ _ -> do    -- keep root alive
         E.finally
-            (foldr1 race_ [multiplexer, handleEvents, handleCalls])
+            (foldr1 race_ [multiplexer, handleEvents, handleCalls,flushTimeout])
             (commClose comm)
 
     return ()
@@ -169,4 +174,13 @@ fromJSStablePtr js w@(Window{..}) = do
             addFinalizer ptr $
               runEval ( return ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')"))
             return ptr
+
+flushCallBuffer :: Window -> IO ()
+flushCallBuffer w@Window{..} = do
+    code' <- atomically $ do
+        code <- readTVar wCallBuffer
+        writeTVar wCallBuffer return
+        return code
+    runEval (intercalate ";" <$> code' [])
+
 

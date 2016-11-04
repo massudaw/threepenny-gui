@@ -168,6 +168,8 @@ data CallBufferMode
     -- ^ When `runFunction` is used to call a JavaScript function,
     -- immediately send a message to the browser window to execute
     -- said function.
+    | BufferCall
+    | BufferAll
     | BufferRun
     -- ^ When `runFunction` is used to call a JavaScript function,
     -- hold back any message to the server.
@@ -179,7 +181,7 @@ data CallBufferMode
 -- | Representation of a browser window.
 data Window = Window
     { runEval        :: IO String -> IO ()
-    , callEval       :: IO String -> IO JSON.Value
+    , callEval       :: TMVar JSON.Value -> IO String -> IO ()
 
     , wCallBuffer     :: TVar ([String] -> IO [String])
     , wCallBufferMode :: TVar CallBufferMode

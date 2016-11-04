@@ -24,8 +24,8 @@ Haskell.createWebSocket = function (url0, receive) {
 
   // Send ping message in regular intervals.
   // We expect pong messages in return to keep the connection alive.
-  compress = function (i) { return dict == null  ? i : pako.deflate(i,{dictionary:dict})}
-  decompress = function (i) { return dict == null ? i : pako.inflate(i,{to:'string',dictionary:dict})}
+  compress = function (i) { return typeof dict == 'undefined' ? i : pako.deflate(i,{dictionary:dict})}
+  decompress = function (i) { return typeof dict == 'undefined' ? String.fromCharCode.apply(null, new Uint8Array(i))  : pako.inflate(i,{to:'string',dictionary:dict})}
   var received = false;
   var ping = function () {
     
@@ -59,6 +59,7 @@ Haskell.createWebSocket = function (url0, receive) {
   
   // Send a JSON message to the server
   that.send = function (json) {
+    Haskell.log("Server message: %o", json);
     ws.send(compress(JSON.stringify(json)));
   };
   

@@ -21,7 +21,7 @@ module Graphics.UI.Threepenny.Core (
     Element, getWindow, mkElement, mkElementNamespace, delete,
         string,
         getHead, getBody,
-        (#+), children, text, html, attr, style, value,
+        (#+), children, text, html, attr, style, value,valueFFI,
     getElementsByTagName, getElementById, getElementsByClassName,
 
     -- * Layout
@@ -31,14 +31,14 @@ module Graphics.UI.Threepenny.Core (
 
     -- * Events
     -- | For a list of predefined events, see "Graphics.UI.Threepenny.Events".
-    EventData, domEvent, unsafeFromJSON, disconnect, on, onEvent, onChanges, unsafeMapUI,mapEventUI ,
+    EventData, domEvent,domEventH,domEventSafe,domEventAsync, unsafeFromJSON, disconnect, on, onEvent, onChanges, unsafeMapUI,mapEventUI ,
     module Reactive.Threepenny,
 
     -- * Attributes
     -- | For a list of predefined attributes, see "Graphics.UI.Threepenny.Attributes".
     (#), (#.),
     Attr, WriteAttr, ReadAttr, ReadWriteAttr(..),ReadWriteAttrMIO(..),
-    set, sink, get, mkReadWriteAttr, mkWriteAttr, mkReadAttr,
+    set, sink,sinkDiff, get, mkReadWriteAttr, mkWriteAttr, mkReadAttr,
     bimapAttr, fromObjectProperty,
 
     -- * Widgets
@@ -47,8 +47,8 @@ module Graphics.UI.Threepenny.Core (
     -- * JavaScript FFI
     -- | Direct interface to JavaScript in the browser window.
     debug, timestamp,
-    ToJS, FFI,
-    JSFunction, ffi, runFunction, callFunction,
+    ToJS, FromJS,FFI,
+    JSFunction, JS.JSAsync(..),ffi,async,event, runFunction, callFunction,ffiAttr,ffiAttrRead,ffiAttrWrite,ffiAttrCall,JS.emptyFunction,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
     ffiExport,
 
@@ -62,6 +62,7 @@ import Control.Monad.Fix
 import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
 
+import Data.Functor.Identity
 import qualified Data.Aeson                      as JSON
 import qualified Foreign.JavaScript              as JS
 import qualified Graphics.UI.Threepenny.Internal as Core
@@ -133,10 +134,11 @@ style = mkWriteAttr $ \xs el -> forM_ xs $ \(name,val) ->
 -- | Value attribute of an element.
 -- Particularly relevant for control widgets like 'input'.
 value :: Attr Element String
-value = mkReadWriteAttr get set
-    where
-    get   el = callFunction $ ffi "$(%1).val()" el
-    set v el = runFunction  $ ffi "$(%1).val(%2)" el v
+value = ffiAttrCall valueFFI
+
+valueFFI :: ReadWriteAttrMIO JSFunction Element String String
+valueFFI = ffiAttr "$(%1).val()" "$(%2).val(%1)"
+
 
 -- | Text content of an element.
 text :: WriteAttr Element String
@@ -299,6 +301,18 @@ data ReadWriteAttrMIO m x i o = ReadWriteAttr
   , set' :: i -> x -> m ()
   }
 
+ffiAttr :: (FromJS b,ToJS x ,ToJS a )=> String -> String -> ReadWriteAttrMIO JSFunction x a b
+ffiAttr get set = ReadWriteAttr (\x  -> ffi get x ) (\x y -> ffi set  x y)
+
+ffiAttrRead :: (FromJS b,ToJS x )=> String -> ReadWriteAttrMIO JSFunction x () b
+ffiAttrRead get = ReadWriteAttr (\x  -> ffi get x ) (\x y -> JS.emptyFunction )
+
+ffiAttrWrite :: (ToJS x ,ToJS a )=> String -> ReadWriteAttrMIO JSFunction x a ()
+ffiAttrWrite set = ReadWriteAttr (\_ -> JS.emptyFunction) (\x y -> ffi set  x y)
+
+ffiAttrCall :: (FromJS b,ToJS x ,ToJS a )=> ReadWriteAttrMIO JSFunction x a b -> ReadWriteAttrMIO UI x a b
+ffiAttrCall (ReadWriteAttr get set ) = ReadWriteAttr (\x -> callFunction $ get x) (\i x -> runFunction $ set i x)
+
 instance MonadIO m => Functor (ReadWriteAttrMIO m x i) where
     fmap f = bimapAttr id f
 
@@ -330,8 +344,21 @@ sink attr bi mx = do
         return ()
     return x
 
+sinkDiff :: Eq i => ReadWriteAttr x i o -> Tidings i -> UI x -> UI x
+sinkDiff attr bi mx = do
+    x <- mx
+    window <- askWindow
+    liftIOLater $ do
+        i <- currentValue (facts bi)
+        runUI window $ set' attr i x
+        let bdiff = filterJust $ (\i j ->if i == j then Nothing else Just j ) <$> facts bi <@> rumors bi
+        Reactive.onEventDyn bdiff  $ \i -> void $ runUI window $ set' attr i x
+        return ()
+    return x
+
+
 -- | Get attribute value.
-get :: ReadWriteAttr x i o -> x -> UI o
+get :: ReadWriteAttrMIO m x i o -> x -> m o
 get attr = get' attr
 
 -- | Build an attribute from a getter and a setter.

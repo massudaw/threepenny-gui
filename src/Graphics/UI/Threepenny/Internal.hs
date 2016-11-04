@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE ExistentialQuantification,DeriveDataTypeable #-}
 module Graphics.UI.Threepenny.Internal (
     -- * Synopsis
     -- | Internal core:
@@ -10,7 +10,7 @@ module Graphics.UI.Threepenny.Internal (
 
     UI, runUI, liftIOLater, askWindow,ui,
 
-    FFI, FromJS, ToJS, JSFunction, JSObject, ffi,
+    FFI, FromJS, ToJS, JSFunction, JSObject, ffi,async,event,
     runFunction, callFunction,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
     ffiExport, debug, timestamp,
@@ -18,10 +18,11 @@ module Graphics.UI.Threepenny.Internal (
     Element(..), fromJSObject, getWindow,
     mkElementNamespace, mkElement, delete, appendChild, clearChildren,
 
-    EventData, domEvent, unsafeFromJSON,
+    EventData, domEvent,domEventSafe,domEventAsync,domEventH, unsafeFromJSON,
     ) where
 
 import Control.Exception
+import Data.Time
 import Data.Unique
 import           Control.Applicative                   (Applicative)
 import           Control.Monad
@@ -32,6 +33,8 @@ import           Control.Monad.Trans.Class
 import qualified Control.Monad.Trans.RWS.Lazy as Monad
 import           Data.Dynamic                          (Typeable)
 
+import Foreign.JavaScript.Marshal (JSFunction (..),JSCode (..))
+-- import Foreign.JavaScript.Types
 import qualified Data.Aeson              as JSON
 import qualified Foreign.JavaScript      as JS
 import qualified Foreign.RemotePtr       as Foreign
@@ -39,20 +42,25 @@ import qualified Foreign.RemotePtr       as Foreign
 import qualified Reactive.Threepenny     as E
 import Reactive.Threepenny    (Dynamic)
 
+import System.IO.Unsafe
 import System.Mem (performGC)
 import Foreign.JavaScript hiding
     (runFunction, callFunction, setCallBufferMode, flushCallBuffer
     ,debug, timestamp, Window)
 
+data Wrap f = forall a . Wrap (f a)
 {-----------------------------------------------------------------------------
     Custom Window type
 ------------------------------------------------------------------------------}
 -- | The type 'Window' represents a browser window.
 data Window = Window
     { wId :: Int
+    , wTimeZone :: TimeZone
     , jsWindow    :: JS.Window  -- JavaScript window
     , eDisconnect :: E.Event () -- event that happens when client disconnects
     , wEvents     :: Foreign.Vendor Events
+                     -- events associated to 'Element's
+    , wAllEvents  :: Foreign.Vendor (Wrap E.Event )
                      -- events associated to 'Element's
     , wChildren   :: Foreign.Vendor ()
                      -- children reachable from 'Element's
@@ -67,17 +75,21 @@ startGUI
     -> IO ()
 startGUI config init preinit finalizer = JS.serve config ( \w -> do
     -- set up disconnect event
-    (eDisconnect, handleDisconnect) <- E.newEvent
+    ((eDisconnect, handleDisconnect),dis) <- E.runDynamic $ E.newEvent
 
     -- make window
     wEvents   <- Foreign.newVendor
+    wAllEvents   <- Foreign.newVendor
     wChildren <- Foreign.newVendor
+    timezone <- jsTimeZone w
     (windowId ,finini) <- E.runDynamic $ preinit
     let window = Window
             { wId = windowId
+            , wTimeZone = timezone
             , jsWindow    = w
             , eDisconnect = eDisconnect
             , wEvents     = wEvents
+            , wAllEvents = wAllEvents
             , wChildren   = wChildren
             }
 
@@ -99,7 +111,7 @@ disconnect = eDisconnect
 {-----------------------------------------------------------------------------
     Elements
 ------------------------------------------------------------------------------}
-type Events = String -> E.Event JSON.Value
+type Events = String -> IO (E.Event JSON.Value)
 
 -- Reachability information for children of an 'Element'.
 -- The children of an element are always reachable from this RemotePtr.
@@ -153,6 +165,28 @@ fromJSObject el = do
         liftIO$ Foreign.addReachable (JS.root $ jsWindow window) el
         fromJSObject0 el window
 
+addEventIO :: String -> JSFunction a -> Bool -> JS.JSObject -> Window -> IO (E.Event a)
+addEventIO name fun@(JSFunction _ m ) async el Window{ jsWindow = w, wAllEvents = wAllEvents} = do
+    -- Lazily create FRP events whenever they are needed.
+    --
+    let initializeEvent (name,_,fun,handler) = do
+            handlerPtr <- JS.exportHandler w handler
+            -- make handler reachable from element
+            Foreign.addFinalizer handlerPtr (putStrLn "event collected")
+            Foreign.addReachable el handlerPtr
+            v <- code fun
+            JS.runFunction w $
+              ffi "Haskell.bind(%1,%2,%3,%4,%5)" el name handlerPtr (unJSCode v)  async
+
+    ((e,h),_) <- E.runDynamic $E.newEvent
+    initializeEvent (name,e,fun,(h <=< m w ))
+    Foreign.withRemotePtr el $ \coupon _ -> do
+        ptr <- Foreign.newRemotePtr coupon (Wrap e) wAllEvents
+        Foreign.addReachable el ptr
+
+    return e
+
+
 -- | Add lazy FRP events to a JavaScript object.
 addEvents :: JS.JSObject -> Window -> IO Events
 addEvents el Window{ jsWindow = w, wEvents = wEvents } = do
@@ -176,7 +210,6 @@ addEvents el Window{ jsWindow = w, wEvents = wEvents } = do
 -- | Lookup or create lazy events for a JavaScript object.
 getEvents :: JS.JSObject -> Window -> E.Dynamic Events
 getEvents el window@Window{ wEvents = wEvents } = do
-    E.registerDynamic (Foreign.destroy el)
     liftIO$ Foreign.withRemotePtr el $ \coupon _ -> do
         mptr <- Foreign.lookup coupon wEvents
         case mptr of
@@ -204,7 +237,50 @@ domEvent
         --   the name is @click@ and so on.
     -> Element          -- ^ Element where the event is to occur.
     -> E.Event EventData
-domEvent name el = elEvents el name
+domEvent name el = unsafePerformIO $ elEvents el name
+domEventSafe
+    :: String
+        -- ^ Event name. A full list can be found at
+        --   <http://www.w3schools.com/jsref/dom_obj_event.asp>.
+        --   Note that the @on@-prefix is not included,
+        --   the name is @click@ and so on.
+    -> Element          -- ^ Element where the event is to occur.
+    -> IO (E.Event EventData)
+domEventSafe name el = elEvents el name
+
+domEventH
+    :: String
+        -- ^ Event name. A full list can be found at
+        --   <http://www.w3schools.com/jsref/dom_obj_event.asp>.
+        --   Note that the @on@-prefix is not included,
+        --   the name is @click@ and so on.
+    -> Element          -- ^ Element where the event is to occur.
+    -> JSFunction a
+    -> UI (E.Event a)
+domEventH name el fun = do
+  w <- liftIO $getWindow el
+  liftIO$ addEventIO name fun False (toJSObject el) w
+
+domEventAsync
+    :: String
+        -- ^ Event name. A full list can be found at
+        --   <http://www.w3schools.com/jsref/dom_obj_event.asp>.
+        --   Note that the @on@-prefix is not included,
+        --   the name is @click@ and so on.
+    -> Element          -- ^ Element where the event is to occur.
+    -> JSAsync a
+    -> UI (E.Event a)
+domEventAsync name el (JSAsync fun) = do
+  w <- liftIO $getWindow el
+  liftIO$ addEventIO name fun True (toJSObject el) w
+
+
+async :: JSCode
+async = JSCode "fun"
+
+event = JSCode "event"
+
+
 
 -- | Make a new DOM element with a given tag name.
 mkElement :: String -> UI Element
@@ -360,4 +436,12 @@ debug s = liftJSWindow $ \w -> JS.debug w s
 -- on the client console if the client has debugging enabled.
 timestamp :: UI ()
 timestamp = liftJSWindow JS.timestamp
+
+jsTimeZone :: JS.Window -> IO TimeZone
+jsTimeZone  w = do
+  fmap ((\ i -> TimeZone (negate i) False "") .from )$ JS.callFunction w $ ffi "new Date().getTimezoneOffset()"
+  where
+    from s = let JSON.Success x =JSON.fromJSON s in x
+
+uiTimeZome = wTimeZone <$> askWindow
 

@@ -47,17 +47,18 @@ entry
     -> UI TextEntry
 entry bValue = do -- single text entry
     input <- UI.input
-
+    blurE <- UI.blur input
+    focusE <- UI.focus input
     bEditing <- ui $ stepper False $ and <$>
-        unions [True <$ UI.focus input, False <$ UI.blur input]
+      unions [True <$ focusE , False <$ blurE ]
 
     window <- askWindow
     liftIOLater $ onChangeDyn bValue $ \s ->  runUI window $ do
         editing <- liftIO $ currentValue bEditing
         when (not editing) $ void $ element input # set value s
-
+    change  <- UI.valueChange input
     let _elementTE = input
-        _userTE    = tidings bValue $ UI.valueChange input
+        _userTE    = tidings bValue change
     return TextEntry {..}
 
 {-----------------------------------------------------------------------------
@@ -92,7 +93,7 @@ listBox bitems bsel bdisplay = do
         bindices = (Map.fromList . flip zip [0..]) <$> bitems
         bindex   = lookupIndex <$> bindices <*> bsel
 
-        lookupIndex indices Nothing    = Nothing
+        lookupIndex indices Nothing= Nothing
         lookupIndex indices (Just sel) = Map.lookup sel indices
 
     element list # sink UI.selection bindex
@@ -100,13 +101,13 @@ listBox bitems bsel bdisplay = do
     -- changing the display won't change the current selection
     -- eDisplay <- changes display
     -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
-
+    sel <- UI.selectionChange list
     -- user selection
     let bindices2 :: Behavior (Map.Map Int a)
         bindices2 = Map.fromList . zip [0..] <$> bitems
 
         _selectionLB = tidings bsel $
-            lookupIndex <$> bindices2 <@> UI.selectionChange list
+          lookupIndex <$> bindices2 <@> (Just <$> sel )
         _elementLB   = list
 
     return ListBox {..}

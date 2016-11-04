@@ -16,7 +16,7 @@ import           Data.Text
 import qualified Safe                       as Safe
 import           System.Environment
 import           System.FilePath
-import Data.Maybe (isJust)
+import Data.Maybe (isJust,isNothing)
 
 -- import web libraries
 import           Data.Aeson                             ((.=))
@@ -88,13 +88,13 @@ communicationFromWebSocket dict request = do
             x <- atomically $ STM.readTQueue commOut
             -- see note [ServerMsg strictness]
             let message =  JSON.encode $ x
-            WS.sendBinaryData connection . maybe id compress dict  $ message ) `E.catch` (\e -> print ("sendfailed",e :: E.SomeException))
+            WS.sendBinaryData connection . maybe id compress dict  $ message ) -- `E.catch` (\e -> print ("sendfailed",e :: E.SomeException))
 
     -- read data from browser
-    let readData = forever $ E.catchJust (\e -> if not (isConnectionClosed e) then Just e else Nothing) (do
+    let readData = forever $ E.catchJust (\e -> if not (isConnectionClosed e)  && (isNothing (E.fromException e :: Maybe E.BlockedIndefinitelyOnSTM ))then Just e else Nothing) (do
             input <- WS.receiveData connection
             case (maybe id decompress dict ) input of
-                "ping" -> (WS.sendBinaryData connection . (maybe id compress dict). LBS.pack $ "pong") `E.catch` (\e -> print ("send failed",e :: E.SomeException))
+                "ping" -> (WS.sendBinaryData connection . (maybe id compress dict). LBS.pack $ "pong") --`E.catch` (\e -> print ("send failed",e :: E.SomeException))
                 "quit" -> E.throw WS.ConnectionClosed
                 input  -> case JSON.decode  input of
                     Just x   -> atomically $ STM.writeTQueue commIn x
