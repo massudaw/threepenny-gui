@@ -26,7 +26,7 @@ module Reactive.Threepenny (
     -- ** Application
     (<@>), (<@),
     -- ** Filtering
-    filterE, filterApply, whenE, split,
+    filterE,emap,bmap,tmap, filterApply, whenE, split,
     -- ** Union
     unions, concatenate,
     -- ** Accumulation
@@ -188,10 +188,20 @@ currentValue (B l _) = liftIO $ Prim.readLatch l
     Core Combinators
 ------------------------------------------------------------------------------}
 instance Functor Event where
-  fmap f e = E $ unsafePerformIO $ liftMemo1 (Prim.mapP f) (unE e)
+  fmap  = emap
+  {-# INLINE fmap #-}
+
+emap :: (a ->b ) -> Event a -> Event b
+emap f (E e) = E $ liftMemo1 (Prim.mapP f) e
+
+{-# NOINLINE[1] emap #-}
+{-# RULES
+"emap/emap" forall f g xs . emap f (emap g xs) = emap (f . g) xs
+ #-}
 
 unsafeMapIO :: (a -> IO b) -> Event a -> Event b
-unsafeMapIO f e = E $ unsafePerformIO $ liftMemo1 (Prim.unsafeMapIOP f) (unE e)
+unsafeMapIO f (E e) = E $ liftMemo1 (Prim.unsafeMapIOP f) e
+
 
 -- | Event that never occurs.
 -- Think of it as @never = []@.
@@ -202,7 +212,7 @@ never = E $ fromPure Prim.neverP
 -- Think of it as
 --
 -- > filterJust es = [(time,a) | (time,Just a) <- es]
-filterJust e = E $ unsafePerformIO $ liftMemo1 Prim.filterJustP (unE e)
+filterJust e = E $ liftMemo1 Prim.filterJustP (unE e)
 
 -- | Merge two event streams of the same type.
 -- In case of simultaneous occurrences, the event values are combined
@@ -221,7 +231,7 @@ unionWith f e1 e2 = E $ unsafePerformIO $ liftMemo2 (Prim.unionWithP f) (unE e1)
 --
 -- > apply bf ex = [(time, bf time x) | (time, x) <- ex]
 apply :: Behavior (a -> b) -> Event a -> Event b
-apply  f x        = E $ unsafePerformIO $ liftMemo1 (\p -> Prim.applyP (latch f) p) (unE x)
+apply  f x        = E $ liftMemo1 (\p -> Prim.applyP (latch f) p) (unE x)
 
 infixl 4 <@>, <@
 
@@ -279,7 +289,15 @@ accumE a e = do
   return $ E $ fromPure p
 
 instance Functor Behavior where
-    fmap f ~(B l e) = B (Prim.mapL f l) e
+  fmap = bmap
+
+bmap :: (a ->b ) -> Behavior a -> Behavior b
+bmap f ~(B l e) = B (Prim.mapL f l) e
+{-# NOINLINE [1] bmap #-}
+
+{-# RULES
+"bmap/bmap" forall f g xs . bmap f (bmap g xs) = bmap (f . g) xs
+ #-}
 
 instance Applicative Behavior where
     pure a  = B (Prim.pureL a) never
@@ -410,15 +428,27 @@ data Tidings a = T { facts :: Behavior a, rumors :: Event a }
 -- | Smart constructor. Combine facts and rumors into 'Tidings'.
 tidings :: Behavior a -> Event a -> Tidings a
 tidings b e = T b e
+{-# INLINE tidings #-}
 
 instance Functor Tidings where
-    fmap f (T b e) = T (fmap f b) (fmap f e)
+  fmap = tmap
+  {-# INLINE fmap #-}
+
+tmap :: (a ->b ) -> Tidings a -> Tidings b
+tmap f (T b e) = T (bmap f b) (emap f e)
+
+{-# NOINLINE [0] tmap #-}
+{-# RULES
+"tmap/tmap" forall f g xs . tmap f (tmap g xs) = tmap (f . g) xs
+ #-}
 
 -- | The applicative instance combines 'rumors'
 -- and uses 'facts' when some of the 'rumors' are not available.
 instance Applicative Tidings where
     pure x  = T (pure x) never
+    {-# INLINE pure #-}
     f <*> x = uncurry ($) <$> pair f x
+    {-# INLINE (<*>) #-}
 
 pair :: Tidings a -> Tidings b -> Tidings (a,b)
 pair (T bx ex) (T by ey) = T b e

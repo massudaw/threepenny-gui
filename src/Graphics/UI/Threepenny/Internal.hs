@@ -172,7 +172,6 @@ addEventIO name fun@(JSFunction _ m ) async el Window{ jsWindow = w, wAllEvents 
     let initializeEvent (name,_,fun,handler) = do
             handlerPtr <- JS.exportHandler w handler
             -- make handler reachable from element
-            Foreign.addFinalizer handlerPtr (putStrLn "event collected")
             Foreign.addReachable el handlerPtr
             v <- code fun
             JS.runFunction w $

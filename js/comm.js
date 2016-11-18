@@ -59,7 +59,7 @@ Haskell.createWebSocket = function (url0, receive) {
   
   // Send a JSON message to the server
   that.send = function (json) {
-    Haskell.log("Server message: %o", json);
+    Haskell.log("Client message: %o", json);
     ws.send(compress(JSON.stringify(json)));
   };
   

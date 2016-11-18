@@ -104,7 +104,7 @@ eventLoop init comm = do
             m
 
     let flushTimeout = forever ( do
-            threadDelay (300*1000)
+            threadDelay (200*1000)
             flushCallBuffer w)
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do

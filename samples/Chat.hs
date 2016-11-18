@@ -47,7 +47,7 @@ setup globalMsgs window = do
 
     messageReceiver <- liftIO $ forkIO $ receiveMessages window msgs messageArea
 
-    ui$ registerDynamic $ do
+    ui$registerDynamic $ do
         print "Run disconnect"
         killThread messageReceiver
         now   <- getCurrentTime
@@ -88,7 +88,8 @@ mkNickname = do
     UI.setFocus input
 
     nick <- liftIO $ newIORef ""
-    on UI.keyup input $ \_ -> liftIO . writeIORef nick . trim =<< get value input
+    ku <- UI.keyup input
+    onEvent ku $ \_ -> liftIO . writeIORef nick . trim =<< get value input
     return (nick,el)
 
 mkMessage :: Message -> UI Element

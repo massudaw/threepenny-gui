@@ -35,9 +35,18 @@ type Map = Map.HashMap
 -- Turn evaluation action into pulse that caches the value.
 cacheEval :: EvalP (Maybe a) -> Build (Pulse a)
 cacheEval e = do
+    key <-  Vault.newKey
     return $ Pulse
         { addHandlerP = \_ -> return (return ())
-        , evalP       = e}
+        , evalP       = do
+            vault <- Monad.get
+            case Vault.lookup key vault of
+                Just a  -> return a
+                Nothing -> do
+                    a <- e
+                    Monad.put $ Vault.insert key a vault
+                    return a
+        }
 
 -- Add a dependency to a pulse, for the sake of keeping track of dependencies.
 dependOn :: Pulse a -> Pulse b -> Pulse a
@@ -45,7 +54,6 @@ dependOn p q = p { addHandlerP = \h -> do
   i <- addHandlerP q h
   j <- addHandlerP p h
   return (i  >> j ) }
-{-# INLINE dependOn #-}
 
 -- Execute an action when the pulse occurs
 whenPulse :: Pulse a -> (a -> IO ()) -> Handler
@@ -126,7 +134,8 @@ neverP = Pulse
 -- | Map a function over pulses.
 mapP :: (a -> b) -> Pulse a -> Build (Pulse b)
 mapP f p = (`dependOn` p) <$> cacheEval (return . fmap f =<< evalP p)
-{-#  INLINE mapP #-}
+{-#  INLINE[2]  mapP #-}
+
 
 -- | Map an IO function over pulses. Is only executed once.
 unsafeMapIOP :: (a -> IO b) -> Pulse a -> Build (Pulse b)
@@ -196,7 +205,8 @@ pureL a = Latch { readL = return a }
 -- Evaluated only when needed, result is not cached.
 mapL :: (a -> b) -> Latch a -> Latch b
 mapL f l = Latch { readL = f <$> readL l }
-{-# INLINE mapL #-}
+{-# INLINE  mapL #-}
+
 
 -- | Apply two current latch values
 --
@@ -211,7 +221,7 @@ applyL l1 l2 = Latch { readL = readL l1 <*> readL l2 }
 test :: IO (Int -> IO ())
 test = do
     (p1, fire,_) <- newPulse
-    p2     <- mapP (+) p1
+    p2     <- mapP ((+2).) =<< mapP (+) p1
     (l1,_,_) <- accumL 0 p2
     let l2 =  mapL const l1
     p3     <- applyP l2 p1
