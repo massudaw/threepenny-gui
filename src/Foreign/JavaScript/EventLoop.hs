@@ -10,7 +10,7 @@ import           Control.Applicative
 import           Control.Concurrent
 import           Control.Concurrent.Async
 import           Control.Concurrent.STM   as STM
-import           Control.Exception        as E    (finally)
+import           Control.Exception        as E    (finally,catch,SomeException)
 import           Control.Monad
 import qualified Data.Aeson               as JSON
 import           Data.IORef
@@ -104,16 +104,18 @@ eventLoop init comm = do
             m
 
     let flushTimeout = forever ( do
-            threadDelay (200*1000)
-            flushCallBuffer w)
+            threadDelay (300*1000)
+            flushCallBuffer w `E.catch`(\e -> putStrLn $ "flushCallBuffer" ++ show (e::E.SomeException) ))
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             (ref,msgio) <- atomically $ do
                 (ref, msg) <- readTQueue calls
                 writeTVar calling True
                 return (ref,msg)
-            msg <- msgio
-            traverse (\msg-> atomically $ writeServer comm msg) (notEmptyMsg msg)
+            (do
+              msg <- msgio
+              traverse (\msg-> atomically $ writeServer comm msg) (notEmptyMsg msg)
+              return ())`E.catch` (\e -> putStrLn (show (e ::E.SomeException)))
             atomically $ do
                 writeTVar calling False
                 case ref of
@@ -123,7 +125,7 @@ eventLoop init comm = do
                     Nothing  -> return ()
 
     -- Receive events from client and handle them in order.
-    let handleEvents = do
+    let handleEvents = (do
             init w
             forever $ do
                 e <- atomically $ do
@@ -131,7 +133,7 @@ eventLoop init comm = do
                     readTQueue events
                 handleEvent w e
                 rebug
-                atomically $ writeTVar handling False
+                atomically $ writeTVar handling False)`E.catch` (\e -> print  (e :: SomeException))
 
     Foreign.withRemotePtr (wRoot w) $ \_ _ -> do    -- keep root alive
         E.finally

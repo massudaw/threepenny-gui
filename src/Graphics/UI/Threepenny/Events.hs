@@ -6,7 +6,7 @@ module Graphics.UI.Threepenny.Events (
     onChangeE,valueChange, selectionChange, checkedChange,
 
     -- * Standard DOM events
-    click, mousewheel,mousemove, mousedown, mouseup, hover, leave,
+    click,dblclick, mousewheel,mousemove, mousedown, mouseup, hover, leave,
     focus, blur,
     KeyCode, keyup, keydown,keydownFilter
     ) where
@@ -50,6 +50,9 @@ mousewheel el =  fmap (`div` 120) <$> domEventH  "wheel" el  (ffi "%1.preventDef
 
 click :: Element -> UI (Event ())
 click el = domEventH "click" el (ffi "")
+
+dblclick :: Element -> UI (Event ())
+dblclick el = domEventH "dblclick" el (ffi "")
 
 -- | Mouse enters an element.
 hover :: Element -> UI (Event ())

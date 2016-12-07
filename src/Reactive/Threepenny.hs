@@ -300,9 +300,25 @@ bmap f ~(B l e) = B (Prim.mapL f l) e
  #-}
 
 instance Applicative Behavior where
-    pure a  = B (Prim.pureL a) never
-    ~(B lf ef) <*> ~(B lx ex) =
+  pure = pureB
+  {-# INLINE pure #-}
+  (<*>) = applyB
+  {-# INLINE (<*>) #-}
+
+pureB a  = B (Prim.pureL a) never
+applyB ~(B lf ef) ~(B lx ex) =
         B (Prim.applyL lf lx) (unionWith const ef ex)
+
+{-# NOINLINE[1] pureB  #-}
+{-# NOINLINE[1] applyB #-}
+
+{-# RULES
+
+"identity" forall f x .  bmap f  (pureB x) = pureB (f x);
+"applicative homomorphism" forall f x .  pureB f `applyB` pureB x = pureB (f x);
+"applicative interchange" forall u y .  u `applyB` pureB y = pureB ($ y) `applyB` u
+ #-}
+
 
 {- $classes
 
@@ -439,16 +455,27 @@ tmap f (T b e) = T (bmap f b) (emap f e)
 
 {-# NOINLINE [0] tmap #-}
 {-# RULES
-"tmap/tmap" forall f g xs . tmap f (tmap g xs) = tmap (f . g) xs
+"tmap/tmap" forall f g xs . tmap f (tmap g xs) = tmap (f . g) xs;
  #-}
 
 -- | The applicative instance combines 'rumors'
 -- and uses 'facts' when some of the 'rumors' are not available.
 instance Applicative Tidings where
-    pure x  = T (pure x) never
+    pure   = pureT
     {-# INLINE pure #-}
-    f <*> x = uncurry ($) <$> pair f x
+    (<*>)  = applyT
     {-# INLINE (<*>) #-}
+
+pureT x =  T (pure x) never
+applyT f x = uncurry ($) <$> pair f x
+
+{-# NOINLINE[0] pureT  #-}
+{-# NOINLINE[0] applyT #-}
+{-# RULES
+"identity" forall f x .  tmap f  (pureT x) = pureT (f x);
+"applicative homomorphism" forall f x .  pureT f `applyT` pureT x = pureT (f x);
+"applicative interchange" forall u y .  u `applyT` pureT y = pureT ($ y) `applyT` u
+ #-}
 
 pair :: Tidings a -> Tidings b -> Tidings (a,b)
 pair (T bx ex) (T by ey) = T b e

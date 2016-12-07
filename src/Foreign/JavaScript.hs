@@ -16,7 +16,7 @@ module Foreign.JavaScript (
     Window, root,
 
     -- * JavaScript FFI
-    ToJS(..), FromJS, JSAsync(..),JSFunction(..),emptyFunction, JSObject,
+    JSCode(..),ToJS(..), FromJS, JSAsync(..),JSFunction(..),emptyFunction, JSObject,
     FFI, ffi, runFunction, callFunction,
     NewJSObject, unsafeCreateJSObject,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
