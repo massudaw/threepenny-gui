@@ -4,13 +4,14 @@ module Foreign.JavaScript.EventLoop (
     eventLoop,
     runEval, callEval, debug, onDisconnect,
     newHandler, fromJSStablePtr,
+    Result
     ) where
 
 import           Control.Applicative
 import           Control.Concurrent
 import           Control.Concurrent.Async
 import           Control.Concurrent.STM   as STM
-import           Control.Exception        as E    (finally,catch,SomeException)
+import           Control.Exception        as E
 import           Control.Monad
 import qualified Data.Aeson               as JSON
 import           Data.IORef
@@ -40,6 +41,8 @@ handleEvent w@(Window{..}) (name, args, consistency) = do
         Just f  -> withRemotePtr f (\_ f -> f args)
 
 
+type Result = Either String JSON.Value
+
 -- | Event loop for a browser window.
 -- Supports concurrent invocations of `runEval` and `callEval`.
 eventLoop :: (Window -> IO (IO ())) ->  (Comm -> IO ())
@@ -48,11 +51,11 @@ eventLoop init comm = do
     -- The thread `multiplexer` reads from the client and
     --   sorts the messages into the appropriate queue.
     events      <- newTQueueIO
-    results     <- newTQueueIO :: IO (TQueue JSON.Value)
+    results     <- newTQueueIO :: IO (TQueue Result)
     -- The thread `handleCalls` executes FFI calls
     --    from the Haskell side in order.
     -- The corresponding queue records `TMVar`s in which to put the results.
-    calls       <- newTQueueIO :: IO (TQueue (Maybe (TMVar JSON.Value), IO ServerMsg))
+    calls       <- newTQueueIO :: IO (TQueue (Maybe (TMVar Result), IO ServerMsg))
     -- The thread `handleEvents` handles client Events in order.
 
     -- Events will be queued (and labelled `Inconsistent`) whenever
@@ -62,21 +65,31 @@ eventLoop init comm = do
     handling    <- newTVarIO False
     calling     <- newTVarIO False
 
+    -- We only want to make an FFI call when the connection browser<->server is open
+    -- Otherwise, throw an exception.
+    let atomicallyIfOpen stm = do
+            r <- atomically $ do
+                b <- readTVar (commOpen comm)
+                if b then fmap Right stm else return (Left ())
+            case r of
+                Right a -> return a
+                Left  _ -> error "Foreign.JavaScript: Browser <-> Server communication broken."
+
     -- FFI calls are made by writing to the `calls` queue.
-    w0 <- newPartialWindow
     let run msg = do
-            atomically $ writeTQueue calls (Nothing , msg)
+            atomicallyIfOpen $ writeTQueue calls (Nothing , msg)
         call ref  msg = do
             --ref <- newEmptyTMVarIO
-            atomically $ writeTQueue calls (Just ref, msg)
+            atomicallyIfOpen $ writeTQueue calls (Just ref, msg)
             --atomically $ takeTMVar ref
         debug    s = do
-            atomically $ writeServer comm $ Debug s
+            atomicallyIfOpen $ writeServer comm $ Debug s
 
     -- We also send a separate event when the client disconnects.
     disconnect <- newTVarIO $ return ()
     let onDisconnect m = atomically $ writeTVar disconnect m
 
+    w0 <- newPartialWindow
     let w = w0 { runEval        = run  . fmap RunEval
                , callEval       = (\ref -> call ref . fmap CallEval)
                , debug        = debug
@@ -88,20 +101,23 @@ eventLoop init comm = do
     --
     -- Read client messages and send them to the
     -- thread that handles events or the thread that handles FFI calls.
-    let multiplexer = do
-            m <- untilJustM $ atomically $ do
+    let multiplexer = void $ untilJustM $ do
+            atomically $ do
                 msg <- readClient comm
                 case msg of
-                    Event x y -> do
+                    Event x y   -> do
                         b <- (||) <$> readTVar handling <*> readTVar calling
                         let c = if b then Inconsistent else Consistent
                         writeTQueue events (x,y,c)
                         return Nothing
                     Result x  -> do
-                        writeTQueue results x
-                        return Nothing
+                      writeTQueue results (Right x)
+                      return Nothing
+                    Exception e -> do
+                      writeTQueue results (Left  e)
+                      return Nothing
+
                     Quit      -> Just <$> readTVar disconnect
-            m
 
     let flushTimeout = forever ( do
             threadDelay (300*1000)
@@ -136,11 +152,23 @@ eventLoop init comm = do
                 atomically $ writeTVar handling False)`E.catch` (\e -> print  (e :: SomeException))
 
     Foreign.withRemotePtr (wRoot w) $ \_ _ -> do    -- keep root alive
-        E.finally
-            (foldr1 race_ [multiplexer, handleEvents, handleCalls,flushTimeout])
-            (commClose comm)
+        printException $
+          E.finally
+              (foldr1 race_ [multiplexer, handleEvents, handleCalls,flushTimeout])
+              (do
+                putStrLn "Foreign.JavaScript: Browser window disconnected."
+                commClose comm
+                m <- atomically $ readTVar disconnect
+                m  )
 
     return ()
+
+-- | Execute an IO action, but also print any exceptions that it may throw.
+-- (The exception is rethrown.)
+printException :: IO a -> IO a
+printException = E.handle $ \e -> do
+    putStrLn $ show (e :: E.SomeException)
+    E.throwIO e
 
 -- | Repeat an action until it returns 'Just'. Similar to 'forever'.
 untilJustM :: Monad m => m (Maybe a) -> m a

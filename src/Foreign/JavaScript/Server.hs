@@ -77,6 +77,7 @@ communicationFromWebSocket dict request = do
     connection <- WS.acceptRequest request
     commIn     <- STM.newTQueueIO   -- outgoing communication
     commOut    <- STM.newTQueueIO   -- incoming communication
+    commOpen   <- STM.newTVarIO True
 
     -- write data to browser
     --
@@ -107,12 +108,22 @@ communicationFromWebSocket dict request = do
     let manageConnection = do
          withAsync sendData $ \_ -> do
             Left e <- waitCatch =<< async readData
-            atomically $ STM.writeTQueue commIn $
+
+            let all :: E.SomeException -> Maybe ()
+                all _ = Just ()
+            E.tryJust all $ WS.sendClose connection $ LBS.pack "close"
+            atomically $ do
+              STM.writeTVar   commOpen False
+              STM.writeTQueue commIn $
                 JSON.object [ "tag" .= ("Quit" :: Text) ] -- write Quit event
-            E.throw e
+
+        -- there is no point in rethrowing the exception, this thread is dead
 
     thread <- forkFinally manageConnection
         (\_ -> WS.sendClose connection $ LBS.pack "close")
+    -- FIXME: In principle, the thread could be killed *again*
+    -- while the `Comm` is being closed, preventing the `commIn` queue
+    -- from receiving the "Quit" message
     let commClose = killThread thread
 
     return $ Comm {..}

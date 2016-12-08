@@ -29,10 +29,12 @@ Haskell.createWebSocket = function (url0, receive) {
   var received = false;
   var ping = function () {
     
-    if (received) 
+    // Only send a ping when it has a chance to reach the server.
+  if (ws.readyState !== WebSocket.CLOSING && ws.readyState !== WebSocket.CLOSED) {
       ws.send(compress("ping"));
-    window.setTimeout(ping,2000);
+      window.setTimeout(ping,2000);
   };
+  }
   
   // Start communication when the WebSocket is opened.
   ws.onopen = function (e) {
@@ -62,6 +64,8 @@ Haskell.createWebSocket = function (url0, receive) {
     Haskell.log("Client message: %o", json);
     ws.send(compress(JSON.stringify(json)));
   };
+  // Close the connection
+  that.close = function () { ws.send(compress("quit")); };
   
   return that;
 };

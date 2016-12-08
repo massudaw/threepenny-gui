@@ -16,7 +16,7 @@ module Foreign.JavaScript (
     Window, root,
 
     -- * JavaScript FFI
-    JSCode(..),ToJS(..), FromJS, JSAsync(..),JSFunction(..),emptyFunction, JSObject,
+    JavaScriptException(..),JSCode(..),ToJS(..), FromJS, JSAsync(..),JSFunction(..),emptyFunction, JSObject,
     FFI, ffi, runFunction, callFunction,
     NewJSObject, unsafeCreateJSObject,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
@@ -27,6 +27,7 @@ module Foreign.JavaScript (
 import           Control.Concurrent.STM       as STM
 import           Control.Monad                           (unless)
 import qualified Data.Aeson                   as JSON
+import qualified Control.Exception as E
 import           Foreign.JavaScript.EventLoop
 import           Foreign.JavaScript.Marshal
 import           Foreign.JavaScript.Server
@@ -80,7 +81,9 @@ callFunction w f = do
     ref <- newEmptyTMVarIO
     bufferCallEval w ref (toCode f)
     resultJS <- atomically $ takeTMVar ref
-    marshalResult f w resultJS
+    case resultJS of
+        Left  e -> E.throwIO $ JavaScriptException e
+        Right x -> marshalResult f w x
 
 -- | Export a Haskell function as an event handler.
 --
@@ -114,7 +117,7 @@ setCallBufferMode w@Window{..} new = do
 
 -- | Flush the call buffer,
 -- i.e. send all outstanding JavaScript to the client in one single message.
-flushCallEvalBuffer :: Window -> TMVar JSON.Value -> IO ()
+flushCallEvalBuffer :: Window -> TMVar Result -> IO ()
 flushCallEvalBuffer w@Window{..} ref = do
     code' <- atomically $ do
         code <- readTVar wCallBuffer
@@ -135,7 +138,7 @@ flushCallBuffer w@Window{..} = do
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
-bufferCallEval :: Window -> TMVar JSON.Value -> IO String -> IO ()
+bufferCallEval :: Window -> TMVar Result -> IO String -> IO ()
 bufferCallEval w@Window{..} ref icode = do
   action <- atomically $ do
         mode <- readTVar wCallBufferMode

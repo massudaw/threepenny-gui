@@ -21,12 +21,12 @@ module Graphics.UI.Threepenny.Internal (
     EventData, domEvent,domEventSafe,domEventAsync,domEventH, unsafeFromJSON,
     ) where
 
-import Control.Exception
 import Data.Time
 import Data.Unique
 import           Control.Applicative                   (Applicative)
 import           Control.Monad
 import qualified Control.Monad.Trans.State.Strict as State
+import           Control.Monad.Catch
 import           Control.Monad.Fix
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
@@ -76,6 +76,7 @@ startGUI
 startGUI config init preinit finalizer = JS.serve config ( \w -> do
     -- set up disconnect event
     ((eDisconnect, handleDisconnect),dis) <- E.runDynamic $ E.newEvent
+    JS.onDisconnect w $ handleDisconnect ()
 
     -- make window
     wEvents   <- Foreign.newVendor
@@ -95,7 +96,7 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
 
     -- run initialization
     fin <- E.execDynamic ( runUI window $ init window) `catch` (\e -> putStrLn (show (e :: SomeException)) >> finalizer window >> handleDisconnect ()>> return ([return ()]) )
-    JS.onDisconnect w $ putStrLn ("Finalize GUI: finalizers (" ++ show (length fin) ++ ")") >> sequence_ (finini ++ fin) >>  finalizer window  >> handleDisconnect ()
+    -- JS.onDisconnect w $ putStrLn ("Finalize GUI: finalizers (" ++ show (length fin) ++ ")") >> sequence_ (finini ++ fin) >>  finalizer window  >> handleDisconnect ()
     return (finalizer window)) `catch` (\e -> putStrLn ("serve failed" ++ show (e :: SomeException)) )
 
 -- | Event that occurs whenever the client has disconnected,
@@ -369,6 +370,12 @@ instance MonadIO UI where
 
 instance MonadFix UI where
     mfix f = UI $ mfix (unUI . f)
+
+instance MonadThrow UI where
+    throwM = UI . throwM
+
+instance MonadCatch UI where
+    catch m f = UI $ catch (unUI m) (unUI . f)
 
 -- | Execute an 'UI' action in a particular browser window.
 -- Also runs all scheduled 'IO' actions.
