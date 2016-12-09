@@ -16,6 +16,10 @@ Haskell.createWebSocket = function (url0, receive) {
   var that = {};
   var url  =  'ws' + url0.slice(4) + 'websocket/';
   var ws   = new WebSocket(url);
+  var wsIn = 0
+  var wsInDecompressed = 0
+  var wsOut = 0
+  var wsOutDecompressed = 0
   
   // Close WebSocket when the browser window is closed.
   $(window).unload( function () {
@@ -45,10 +49,13 @@ Haskell.createWebSocket = function (url0, receive) {
       myfile.addEventListener('loadend',function(e){
       // Haskell.log("WebSocket message: %o",msg);
       var data = decompress(e.srcElement.result); 
+      wsInDecompressed = data.length + wsInDecompressed ;
+      document.getElementById("wsLogger").innerHTML = Math.floor(wsIn/1024) + '/' + Math.floor(wsInDecompressed/1024) + 'KB';
       if (data !== "pong") {
         receive(JSON.parse(data));
       }
       })
+      wsIn = msg.data.size + wsIn;
       myfile.readAsArrayBuffer(msg.data);
     };
     ws.onclose = function (e) {

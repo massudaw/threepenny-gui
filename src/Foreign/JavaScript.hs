@@ -79,7 +79,7 @@ unsafeCreateJSObject w f = do
 callFunction :: Window -> JSFunction a -> IO a
 callFunction w f = do
     ref <- newEmptyTMVarIO
-    bufferCallEval w ref (toCode f)
+    bufferCallEval w ref (fmap ("return " <> ) $ toCode f)
     resultJS <- atomically $ takeTMVar ref
     case resultJS of
         Left  e -> E.throwIO $ JavaScriptException e

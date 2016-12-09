@@ -36,7 +36,7 @@ Haskell.initFFI = function () {
 
       case "RunEval":
         try {
-          (new Function(msg.contents))();
+          (Function(msg.contents))();
           reply();
         } catch (err) {
           connection.close();
@@ -46,7 +46,7 @@ Haskell.initFFI = function () {
 
       case "CallEval":
         try {
-          var result = eval(msg.contents);
+          var result = (Function(msg.contents))();
           reply({ tag : "Result"   , contents : result });
         } catch (err) {
           reply({ tag : "Exception", contents : err.toString() });
