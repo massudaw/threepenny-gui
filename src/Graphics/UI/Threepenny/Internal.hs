@@ -444,10 +444,10 @@ timestamp :: UI ()
 timestamp = liftJSWindow JS.timestamp
 
 jsTimeZone :: JS.Window -> IO TimeZone
-jsTimeZone  w = do
+jsTimeZone  w = return utc {-do
   fmap ((\ i -> TimeZone (negate i) False "") .from )$ JS.callFunction w $ ffi "new Date().getTimezoneOffset()"
   where
     from s = let JSON.Success x =JSON.fromJSON s in x
-
+-}
 uiTimeZome = wTimeZone <$> askWindow
 
