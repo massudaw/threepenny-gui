@@ -2,6 +2,8 @@ module Graphics.UI.Threepenny.Attributes (
     -- * Synopsis
     -- | Element attributes.
 
+    strAttr,boolAttr,intAttr,
+
     -- * Input elements
     checked, selection, enabled,
 
@@ -51,6 +53,9 @@ selection = fromJQueryProp "selectedIndex" from (JSON.toJSON . maybe (-1) id)
 ------------------------------------------------------------------------------}
 strAttr :: String -> WriteAttr Element String
 strAttr name = mkWriteAttr (set' (attr name))
+
+boolAttr :: String -> WriteAttr Element Bool
+boolAttr name = mkWriteAttr (set' (attrJS name) )
 
 intAttr :: String -> WriteAttr Element Int
 intAttr name = mkWriteAttr (set' (attr name) . show)

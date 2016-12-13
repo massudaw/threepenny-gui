@@ -44,7 +44,7 @@ addStyleSheet w filename = void $ do
             # set (attr "rel" ) "stylesheet"
             # set (attr "type") "text/css"
             # set (attr "href") ("/static/css/" ++ filename)
-    getHead w #+ [element el]
+    addHead [element el]
 
 -- | Make a new @div@ element, synonym for 'div'.
 new :: UI Element

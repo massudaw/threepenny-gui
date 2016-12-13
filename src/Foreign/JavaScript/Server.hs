@@ -135,15 +135,15 @@ type Routes = [(ByteString, Snap ())]
 
 routeResources :: Maybe String -> Maybe FilePath -> Maybe FilePath -> Routes
 routeResources dict customHTML staticDir =
-    fixHandlers noCache $
-        static ++
-        [("/"            , root)
+  fixHandlers noExpires static ++
+        fixHandlers noCache  [("/"            , root)
         ,("/haskell.js"  , writeTextMime (jsDriverCode  dict) "application/javascript")
         ,("/haskell.css" , writeTextMime cssDriverCode "text/css")
         ]
     where
     fixHandlers f routes = [(a,f b) | (a,b) <- routes]
-    noCache h = modifyResponse (setHeader "Cache-Control" "no-cache") >> h
+    noCache h = modifyResponse (setHeader "Cache-Control" "max-age=7200") >> h
+    noExpires h = modifyResponse (setHeader "Cache-Control" "max-age=7200") >> modifyResponse (setHeader "Expires" "Thu, 15 Apr 2020 20:00:00 GMT") >> h
 
     static = maybe [] (\dir -> [("/static", serveDirectory dir)]) staticDir
 

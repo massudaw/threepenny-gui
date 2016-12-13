@@ -20,8 +20,8 @@ module Graphics.UI.Threepenny.Core (
     -- | Create and manipulate DOM elements.
     Element, getWindow, mkElement, mkElementNamespace, delete,
         string,
-        getHead, getBody,
-        (#+), children, text, html, attr, style, value,valueFFI,
+        getHead, getBody,addHead,addBody,
+        (#+), children, text, html, attr,attrJS, style, value,valueFFI,
     getElementsByTagName, getElementById, getElementsByClassName,
 
     -- * Layout
@@ -127,6 +127,11 @@ attr :: String -> WriteAttr Element String
 attr name = mkWriteAttr $ \s el ->
     runFunction $ ffi "$(%1).attr(%2,%3)" el name s
 
+attrJS :: ToJS a => String -> WriteAttr Element a
+attrJS name = mkWriteAttr $ \s el ->
+    runFunction $ ffi "$(%1).attr(%2,%3)" el name s
+
+
 -- | Set CSS style of an Element
 style :: WriteAttr Element [(String,String)]
 style = mkWriteAttr $ \xs el -> forM_ xs $ \(name,val) ->
@@ -151,12 +156,24 @@ string :: String -> UI Element
 string s = mkElement "span" # set text s
 
 -- | Get the head of the page.
-getHead :: Window -> UI Element
-getHead _ = fromJSObject =<< callFunction (ffi "document.head")
+getHead :: UI Element
+getHead  = fromJSObject =<< callFunction (ffi "document.head")
+
+addHead :: [UI Element] -> UI ()
+addHead  mys = do
+  ys <- sequence mys
+  mapM (\i -> runFunction (ffi "document.head.append(%1)" i)) ys
+  return ()
 
 -- | Get the body of the page.
-getBody :: Window -> UI Element
-getBody _ = fromJSObject =<< callFunction (ffi "document.body")
+getBody :: UI Element
+getBody = fromJSObject =<< callFunction (ffi "document.body")
+
+addBody :: [UI Element] -> UI ()
+addBody  mys = do
+  ys <- sequence mys
+  mapM (\i -> runFunction (ffi "document.body.append(%1)" i)) ys
+  return ()
 
 -- | Get all elements of the given tag name.
 getElementsByTagName
