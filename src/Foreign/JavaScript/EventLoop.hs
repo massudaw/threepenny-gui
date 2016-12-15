@@ -34,7 +34,7 @@ rebug = return ()
     Event Loop
 ------------------------------------------------------------------------------}
 -- | Handle a single event
-handleEvent w@(Window{..}) (name, args, consistency) = do
+handleEvent w@(Window{..}) (name, args) = do
     mhandler <- Foreign.lookup name wEventHandlers
     case mhandler of
         Nothing -> return ()
@@ -55,15 +55,9 @@ eventLoop init comm = do
     -- The thread `handleCalls` executes FFI calls
     --    from the Haskell side in order.
     -- The corresponding queue records `TMVar`s in which to put the results.
-    calls       <- newTQueueIO :: IO (TQueue (Maybe (TMVar Result), IO ServerMsg))
+    calls       <- newTQueueIO :: IO (TQueue (Maybe (TMVar Result), ServerMsg))
     -- The thread `handleEvents` handles client Events in order.
 
-    -- Events will be queued (and labelled `Inconsistent`) whenever
-    -- the server is
-    --    * busy handling an event
-    --    * or waiting for the result of a function call.
-    handling    <- newTVarIO False
-    calling     <- newTVarIO False
 
     -- We only want to make an FFI call when the connection browser<->server is open
     -- Otherwise, throw an exception.
@@ -90,10 +84,10 @@ eventLoop init comm = do
     let onDisconnect m = atomically $ writeTVar disconnect m
 
     w0 <- newPartialWindow
-    let w = w0 { runEval        = run  . fmap RunEval
-               , callEval       = (\ref -> call ref . fmap CallEval)
+    let w = w0 { runEval        = run  . RunEval
+               , callEval       = (\ref -> call ref . CallEval)
                , debug        = debug
-               , timestamp    = run (return Timestamp)
+               , timestamp    = run (Timestamp)
                , onDisconnect = onDisconnect
                }
 
@@ -106,10 +100,8 @@ eventLoop init comm = do
                 msg <- readClient comm
                 case msg of
                     Event x y   -> do
-                        b <- (||) <$> readTVar handling <*> readTVar calling
-                        let c = if b then Inconsistent else Consistent
-                        writeTQueue events (x,y,c)
-                        return Nothing
+                      writeTQueue events (x,y)
+                      return Nothing
                     Result x  -> do
                       writeTQueue results (Right x)
                       return Nothing
@@ -124,16 +116,13 @@ eventLoop init comm = do
             flushCallBuffer w `E.catch`(\e -> putStrLn $ "flushCallBuffer" ++ show (e::E.SomeException) ))
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
-            (ref,msgio) <- atomically $ do
+            (ref,msg) <- atomically $ do
                 (ref, msg) <- readTQueue calls
-                writeTVar calling True
                 return (ref,msg)
             (do
-              msg <- msgio
               traverse (\msg-> atomically $ writeServer comm msg) (notEmptyMsg msg)
               return ())`E.catch` (\e -> putStrLn (show (e ::E.SomeException)))
             atomically $ do
-                writeTVar calling False
                 case ref of
                     Just ref -> do
                         result <- readTQueue results
@@ -145,11 +134,10 @@ eventLoop init comm = do
             init w
             forever $ do
                 e <- atomically $ do
-                    writeTVar handling True
                     readTQueue events
                 handleEvent w e
                 rebug
-                atomically $ writeTVar handling False)`E.catch` (\e -> print  (e :: SomeException))
+                )`E.catch` (\e -> print  (e :: SomeException))
 
     Foreign.withRemotePtr (wRoot w) $ \_ _ -> do    -- keep root alive
         printException $
@@ -202,15 +190,15 @@ fromJSStablePtr js w@(Window{..}) = do
         Nothing -> do
             ptr <- newRemotePtr coupon (JSPtr coupon) wJSObjects
             addFinalizer ptr $
-              runEval ( return ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')"))
+              runEval ( ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')"))
             return ptr
 
 flushCallBuffer :: Window -> IO ()
 flushCallBuffer w@Window{..} = do
     code' <- atomically $ do
         code <- readTVar wCallBuffer
-        writeTVar wCallBuffer return
+        writeTVar wCallBuffer id
         return code
-    runEval (intercalate ";" <$> code' [])
+    runEval $ intercalate ";"  (code' [])
 
 

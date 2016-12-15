@@ -60,7 +60,7 @@ serve config init = httpComm config $ eventLoop $ \w -> do
 -- and may not be run immediately. See 'setCallBufferMode'.
 runFunction :: Window -> JSFunction () -> IO ()
 runFunction w f = do
-  bufferRunEval w  (toCode f)
+  bufferRunEval w  =<< (toCode f)
 
 
 -- | Run a JavaScript function that creates a new object.
@@ -72,14 +72,14 @@ runFunction w f = do
 unsafeCreateJSObject :: Window -> JSFunction NewJSObject -> IO JSObject
 unsafeCreateJSObject w f = do
     g <- wrapImposeStablePtr w f
-    bufferRunEval w (toCode g)
+    bufferRunEval w =<< (toCode g)
     marshalResult g w JSON.Null
 
 -- | Call a JavaScript function and wait for the result.
 callFunction :: Window -> JSFunction a -> IO a
 callFunction w f = do
     ref <- newEmptyTMVarIO
-    bufferCallEval w ref (fmap ("return " <> ) $ toCode f)
+    bufferCallEval w ref . ("return " <> ) =<<  toCode f
     resultJS <- atomically $ takeTMVar ref
     case resultJS of
         Left  e -> E.throwIO $ JavaScriptException e
@@ -121,10 +121,10 @@ flushCallEvalBuffer :: Window -> TMVar Result -> IO ()
 flushCallEvalBuffer w@Window{..} ref = do
     code' <- atomically $ do
         code <- readTVar wCallBuffer
-        writeTVar wCallBuffer return
+        writeTVar wCallBuffer  id
         return code
 
-    callEval ref (intercalate ";"  <$> code' [])
+    callEval ref $ intercalate ";"  ( code' [])
     return ()
 
 
@@ -132,21 +132,20 @@ flushCallBuffer :: Window -> IO ()
 flushCallBuffer w@Window{..} = do
     code' <- atomically $ do
         code <- readTVar wCallBuffer
-        writeTVar wCallBuffer return
+        writeTVar wCallBuffer id
         return code
-    runEval (intercalate ";" <$> code' [])
+    runEval (intercalate ";" $ code' [])
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
-bufferCallEval :: Window -> TMVar Result -> IO String -> IO ()
+bufferCallEval :: Window -> TMVar Result -> String -> IO ()
 bufferCallEval w@Window{..} ref icode = do
   action <- atomically $ do
         mode <- readTVar wCallBufferMode
         let buffer = do
                 msg <- readTVar wCallBuffer
                 writeTVar wCallBuffer (\i -> do
-                  code <- icode
-                  msg (code :i) )
+                  msg (icode :i) )
                 return Nothing
 
         case mode of
@@ -160,15 +159,14 @@ bufferCallEval w@Window{..} ref icode = do
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
-bufferRunEval :: Window -> IO String -> IO ()
+bufferRunEval :: Window -> String -> IO ()
 bufferRunEval w@Window{..} icode = do
   action <- atomically $ do
         mode <- readTVar wCallBufferMode
         let buffer = do
                 msg <- readTVar wCallBuffer
                 writeTVar wCallBuffer (\i -> do
-                  code <- icode
-                  msg (code :i) )
+                  msg (icode :i) )
                 return Nothing
         case mode of
             BufferAll ->  buffer
