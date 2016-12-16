@@ -92,7 +92,7 @@ communicationFromWebSocket dict request = do
             WS.sendBinaryData connection . maybe id compress dict  $ message ) -- `E.catch` (\e -> print ("sendfailed",e :: E.SomeException))
 
     -- read data from browser
-    let readData = forever $ E.catchJust (\e -> if not (isConnectionClosed e)  && (isNothing (E.fromException e :: Maybe E.BlockedIndefinitelyOnSTM ))then Just e else Nothing) (do
+    let readData = forever $  (do
             input <- WS.receiveData connection
             case (maybe id decompress dict ) input of
                 "ping" -> (WS.sendBinaryData connection . (maybe id compress dict). LBS.pack $ "pong") --`E.catch` (\e -> print ("send failed",e :: E.SomeException))
@@ -101,7 +101,7 @@ communicationFromWebSocket dict request = do
                     Just x   -> atomically $ STM.writeTQueue commIn x
                     Nothing  -> error $
                         "Foreign.JavaScript: Couldn't parse JSON input"
-                        ++ show input) (\e -> print ("receive failed" , e :: E.SomeException))
+                        ++ show input)
 
         isConnectionClosed  e= isJust  $ (E.fromException e :: Maybe WS.ConnectionException)
 

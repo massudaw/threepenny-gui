@@ -76,8 +76,8 @@ startGUI
 startGUI config init preinit finalizer = JS.serve config ( \w -> do
     -- set up disconnect event
     ((eDisconnect, handleDisconnect),dis) <- E.runDynamic $ E.newEvent
-    JS.onDisconnect w $ handleDisconnect ()
 
+    JS.onDisconnect w $ handleDisconnect ()
     -- make window
     wEvents   <- Foreign.newVendor
     wAllEvents   <- Foreign.newVendor
@@ -94,10 +94,11 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
             , wChildren   = wChildren
             }
 
+    JS.onDisconnect w $ finalizer window >> sequence_ finini
     -- run initialization
-    fin <- E.execDynamic ( runUI window $ init window) `catch` (\e -> putStrLn (show (e :: SomeException)) >> finalizer window >> handleDisconnect ()>> return ([return ()]) )
-    -- JS.onDisconnect w $ putStrLn ("Finalize GUI: finalizers (" ++ show (length fin) ++ ")") >> sequence_ (finini ++ fin) >>  finalizer window  >> handleDisconnect ()
-    return (finalizer window)) `catch` (\e -> putStrLn ("serve failed" ++ show (e :: SomeException)) )
+    fin <- E.execDynamic ( runUI window $ init window)
+    JS.onDisconnect w $ sequence_ fin
+    return (finalizer window))
 
 -- | Event that occurs whenever the client has disconnected,
 -- be it by closing the browser window or by exception.

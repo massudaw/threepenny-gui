@@ -80,8 +80,8 @@ eventLoop init comm = do
             atomicallyIfOpen $ writeServer comm $ Debug s
 
     -- We also send a separate event when the client disconnects.
-    disconnect <- newTVarIO $ return ()
-    let onDisconnect m = atomically $ writeTVar disconnect m
+    disconnect <- newTMVarIO $ return ()
+    let onDisconnect m = atomically $ takeTMVar disconnect >>= putTMVar disconnect . (>>m)
 
     w0 <- newPartialWindow
     let w = w0 { runEval        = run  . RunEval
@@ -109,11 +109,11 @@ eventLoop init comm = do
                       writeTQueue results (Left  e)
                       return Nothing
 
-                    Quit      -> Just <$> readTVar disconnect
+                    Quit      -> return Nothing -- tryTakeTMVar disconnect
 
     let flushTimeout = forever ( do
             threadDelay (300*1000)
-            flushCallBuffer w `E.catch`(\e -> putStrLn $ "flushCallBuffer" ++ show (e::E.SomeException) ))
+            flushCallBuffer w )
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             (ref,msg) <- atomically $ do
@@ -145,9 +145,10 @@ eventLoop init comm = do
               (foldr1 race_ [multiplexer, handleEvents, handleCalls,flushTimeout])
               (do
                 putStrLn "Foreign.JavaScript: Browser window disconnected."
+                m <- atomically $ tryTakeTMVar disconnect
+                maybe (putStrLn "No disconnect event ") id m
                 commClose comm
-                m <- atomically $ readTVar disconnect
-                m  )
+                  )
 
     return ()
 
