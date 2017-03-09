@@ -1,4 +1,4 @@
-{-# LANGUAGE RecursiveDo  #-}
+{-# LANGUAGE BangPatterns,RecursiveDo  #-}
 module Reactive.Threepenny (
     -- * Synopsis
     -- | Functional reactive programming.
@@ -38,14 +38,16 @@ module Reactive.Threepenny (
 
     -- * Tidings
     Tidings, tidings, facts, rumors,
+    accumT,
 
     -- * Internal
     -- | Functions reserved for special circumstances.
     -- Do not use unless you know what you're doing.
-    onChange, unsafeMapIO, newEventsNamed,mapEventDyn,onEventDyn,onChangeDyn
+    onChange, unsafeMapIO, newEventsNamed,mapEventDyn,mapEventDynInterrupt,onEventDyn,onChangeDyn
     ) where
 
 import Control.Applicative
+import Control.Concurrent
 import Control.Monad (void,(>=>))
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -65,6 +67,7 @@ type Dynamic  = State.StateT [IO ()] IO
 
 runDynamic :: Dynamic a -> IO (a,[IO()])
 runDynamic w = State.runStateT w []
+
 
 execDynamic :: Dynamic a -> IO [IO()]
 execDynamic w = State.execStateT w []
@@ -224,7 +227,7 @@ filterJust e = E $ liftMemo1 Prim.filterJustP (unE e)
 -- >    | timex <  timey = (timex,x)     : unionWith f xs ((timey,y):ys)
 -- >    | timex >  timey = (timey,y)     : unionWith f ((timex,x):xs) ys
 unionWith :: (a -> a -> a) -> Event a -> Event a -> Event a
-unionWith f e1 e2 = E $ unsafePerformIO $ liftMemo2 (Prim.unionWithP f) (unE e1) (unE e2)
+unionWith f e1 e2 = E $ liftMemo2 (Prim.unionWithP f) (unE e1) (unE e2)
 
 -- | Apply a time-varying function to a stream of events.
 -- Think of it as
@@ -260,7 +263,11 @@ accumB a e = do
   p2      <- liftIO$ Prim.mapP (const ()) p1
   return $ B l1 (E $ fromPure p2)
 
+accumT :: a -> Event (a ->a) -> Dynamic (Tidings a)
+accumT = mapAccumT
 
+mapAccumT i e= uncurry (flip tidings) <$> mapAccum i ((\i -> dup . i )<$> e)
+  where dup (!i) = (i,i)
 
 -- | Construct a time-varying function from an initial value and
 -- a stream of new values. Think of it as
@@ -400,6 +407,7 @@ concatenate = foldr (.) id
 
 onEventIO :: Event a -> (a -> IO void) -> Dynamic ()
 onEventIO e h =   register e (void . h)
+{-# INLINE onEventIO #-}
 
 onEventDyn
   :: Event a ->  (a -> Dynamic b) -> Dynamic ()
@@ -484,6 +492,18 @@ pair (T bx ex) (T by ey) = T b e
     x = flip (,) <$> by <@> ex
     y = (,) <$> bx <@> ey
     e = unionWith (\ ~(x,_) ~(_,y) -> (x,y)) x y
+
+mapEventDynInterrupt ::(a -> Dynamic b) -> Event a -> Dynamic (Event (b,[IO()]) ,Event (IO ()) )
+mapEventDynInterrupt f x = do
+    (e,h) <- newEvent
+    (ei,hi) <- newEvent
+    onEventIO x (\i -> do
+      tid <- forkIO $ (runDynamic $ f i)   >>= h
+      hi (putStrLn ("thread kill "++ show tid) >> killThread tid))
+
+    return  (e,ei)
+
+
 
 mapEventDyn ::(a -> Dynamic b) -> Event a -> Dynamic (Event (b,[IO()]) )
 mapEventDyn f x = do

@@ -4,7 +4,7 @@ module Reactive.Threepenny.PulseLatch (
     neverP, mapP, filterJustP, unionWithP, unsafeMapIOP,dependOn,
 
     Latch,
-    pureL, mapL, applyL, accumL, applyP,
+    pureL, mapL,applyL, accumL, applyP,
     readLatch,
     ) where
 
@@ -26,6 +26,7 @@ import           Data.Unique.Really
 
 import Reactive.Threepenny.Monads
 import Reactive.Threepenny.Types
+import System.IO.Unsafe
 
 type Map = Map.HashMap
 
@@ -72,7 +73,6 @@ addHandlerRef handlersRef ((uid,DoLatch),m) = do
 addHandlerRef handlersRef ((uid,DoIO),m) = do
           modifyIORef' handlersRef (fmap (Map.insert uid m))
           return $ modifyIORef' handlersRef (fmap (Map.delete uid ))
-{-# INLINE addHandlerRef #-}
 
 {-----------------------------------------------------------------------------
     Interface to the outside world.
@@ -104,7 +104,6 @@ newPulse = do
           writeIORef handlersRef (Map.empty , Map.empty)
           return ()
     return (Pulse {..}, fireP,cleanP)
-{-# INLINE newPulse #-}
 
 -- | Register a handler to be executed whenever a pulse occurs.
 addHandler :: Pulse a -> (a -> IO ()) -> Build (IO ())
@@ -112,13 +111,8 @@ addHandler p f = do
     uid <- newUnique
     r <- addHandlerP p ((uid, DoIO), whenPulse p f)
     return r
-{-# INLINE addHandler #-}
 
 
--- | Read the value of a 'Latch' at a particular moment in Build.
-readLatch :: Latch a -> Build a
-readLatch = readL
-{-# INLINE readLatch #-}
 
 {-----------------------------------------------------------------------------
     Pulse and Latch
@@ -134,7 +128,6 @@ neverP = Pulse
 -- | Map a function over pulses.
 mapP :: (a -> b) -> Pulse a -> Build (Pulse b)
 mapP f p = (`dependOn` p) <$> cacheEval (return . fmap f =<< evalP p)
-{-#  INLINE[2]  mapP #-}
 
 
 -- | Map an IO function over pulses. Is only executed once.
@@ -144,12 +137,10 @@ unsafeMapIOP f p = (`dependOn` p) <$> cacheEval (traverse . fmap f =<< evalP p)
     traverse :: Maybe (IO a) -> EvalP (Maybe a)
     traverse Nothing  = return Nothing
     traverse (Just m) = Just <$> lift m
-{-# INLINE unsafeMapIOP #-}
 
 -- | Filter occurrences. Only keep those of the form 'Just'.
 filterJustP :: Pulse (Maybe a) -> Build (Pulse a)
 filterJustP p = (`dependOn` p) <$> cacheEval (return . join =<< evalP p)
-{-#  INLINE filterJustP #-}
 
 -- | Pulse that occurs when either of the pulses occur.
 -- Combines values with the indicated function when both occur.
@@ -164,7 +155,6 @@ unionWithP f p q = (`dependOn` q) . (`dependOn` p) <$> cacheEval eval
             (Just a , Nothing) -> Just a
             (Nothing, Just a ) -> Just a
             (Just a1, Just a2) -> Just $ f a1 a2
-{-# INLINE unionWithP #-}
 
 -- | Apply the current latch value whenever the pulse occurs.
 applyP :: Latch (a -> b) -> Pulse a -> Build (Pulse b)
@@ -174,7 +164,6 @@ applyP l p = (`dependOn` p) <$> cacheEval eval
         f <- lift $ readL l
         a <- evalP p
         return $ f <$> a
-{-# INLINE applyP #-}
 
 -- | Accumulate values in a latch.
 accumL :: a -> Pulse (a -> a) -> Build (Latch a, Pulse a,IO ())
@@ -193,27 +182,29 @@ accumL a p1 = do
     unH <- addHandlerP p2 ((uid, DoLatch), handler)
 
     return (l1,p2,unH)
-{-# INLINE accumL #-}
 
 -- | Latch whose value stays constant.
 pureL :: a -> Latch a
 pureL a = Latch { readL = return a }
-{-# INLINE pureL #-}
 
 -- | Map a function over latches.
 --
 -- Evaluated only when needed, result is not cached.
-mapL :: (a -> b) -> Latch a -> Latch b
-mapL f l = Latch { readL = f <$> readL l }
-{-# INLINE  mapL #-}
+mapL :: (a -> b) -> Latch a -> (Latch b)
+mapL f l =
+  Latch { readL = f <$> readL l }
 
+
+
+-- | Read the value of a 'Latch' at a particular moment in Build.
+readLatch :: Latch a -> Build a
+readLatch l = readL l
 
 -- | Apply two current latch values
 --
 -- Evaluated only when needed, result is not cached.
 applyL :: Latch (a -> b) -> Latch a -> Latch b
 applyL l1 l2 = Latch { readL = readL l1 <*> readL l2 }
-{-# INLINE applyL #-}
 
 {-----------------------------------------------------------------------------
     Test

@@ -17,9 +17,9 @@ setup window = void $ do
     return window # set title "Test Speed"
 
     let msg = "This program tries to measure the speed at which HTML elements can be built."
-    getBody window #+ [UI.string msg, UI.br]
+    getBody #+ [UI.string msg, UI.br]
     UI.timestamp
-    getBody window #+ replicate 200 (UI.string "Haskell-")
+    getBody #+ replicate 200 (UI.string "Haskell-")
     UI.timestamp
-    getBody window #+ [UI.string $ concat $ replicate 200 "Haskell-"]
+    getBody #+ [UI.string $ concat $ replicate 200 "Haskell-"]
     UI.timestamp

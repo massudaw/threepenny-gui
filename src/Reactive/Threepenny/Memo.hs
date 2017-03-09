@@ -35,10 +35,9 @@ memoize m = Memoized <$> newIORef (Left m)
 
 liftMemo1 :: (a -> IO b) -> Memo a -> (Memo b)
 liftMemo1 f ma = unsafePerformIO $ memoize $ f =<< at ma
-{-# INLINE [2] liftMemo1 #-}
 
-liftMemo2 :: (a -> b -> IO c) -> Memo a -> Memo b -> IO (Memo c)
-liftMemo2 f ma mb = memoize $ do
+liftMemo2 :: (a -> b -> IO c) -> Memo a -> Memo b -> (Memo c)
+liftMemo2 f ma mb = unsafePerformIO $ memoize $ do
     a <- at ma
     b <- at mb
     f a b

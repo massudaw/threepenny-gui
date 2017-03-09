@@ -61,23 +61,14 @@ eventLoop init comm = do
 
     -- We only want to make an FFI call when the connection browser<->server is open
     -- Otherwise, throw an exception.
-    let atomicallyIfOpen stm = do
-            r <- atomically $ do
-                b <- readTVar (commOpen comm)
-                if b then fmap Right stm else return (Left ())
-            case r of
-                Right a -> return a
-                Left  _ -> error "Foreign.JavaScript: Browser <-> Server communication broken."
 
     -- FFI calls are made by writing to the `calls` queue.
     let run msg = do
-            atomicallyIfOpen $ writeTQueue calls (Nothing , msg)
+           atomicallyIfOpen comm $ writeTQueue calls (Nothing , msg)
         call ref  msg = do
-            --ref <- newEmptyTMVarIO
-            atomicallyIfOpen $ writeTQueue calls (Just ref, msg)
-            --atomically $ takeTMVar ref
+           atomicallyIfOpen comm $ writeTQueue calls (Just ref, msg)
         debug    s = do
-            atomicallyIfOpen $ writeServer comm $ Debug s
+           atomicallyIfOpen comm$ writeServer comm $ Debug s
 
     -- We also send a separate event when the client disconnects.
     disconnect <- newTMVarIO $ return ()
@@ -113,7 +104,7 @@ eventLoop init comm = do
 
     let flushTimeout = forever ( do
             threadDelay (300*1000)
-            flushCallBuffer w )
+            flushCallBuffer comm w )
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             (ref,msg) <- atomically $ do
@@ -194,12 +185,19 @@ fromJSStablePtr js w@(Window{..}) = do
               runEval ( ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')"))
             return ptr
 
-flushCallBuffer :: Window -> IO ()
-flushCallBuffer w@Window{..} = do
-    code' <- atomically $ do
+flushCallBuffer :: Comm -> Window -> IO ()
+flushCallBuffer comm w@Window{..} = do
+    code' <- atomicallyIfOpen comm $ do
         code <- readTVar wCallBuffer
         writeTVar wCallBuffer id
         return code
     runEval $ intercalate ";"  (code' [])
 
+atomicallyIfOpen comm stm = do
+            r <- atomically $ do
+                b <- readTVar (commOpen comm)
+                if b then fmap Right stm else return (Left ())
+            case r of
+                Right a -> return a
+                Left  _ -> error "Foreign.JavaScript: Browser <-> Server communication broken."
 

@@ -12,7 +12,7 @@ import Graphics.UI.Threepenny.Core
 main :: IO ()
 main = do
     static <- getStaticDir
-    startGUI defaultConfig { jsStatic = Just static } setup
+    startGUI defaultConfig { jsStatic = Just static } setup (return 1) (\_ -> return ())
 
 setup :: Window -> UI ()
 setup window = do
@@ -22,9 +22,9 @@ setup window = do
         # set UI.text "Click me"
         # set UI.id_  "button"
     msg    <- UI.span # set UI.text "Some text"
-    
-    getBody window #+ [ element button, element msg ]
-    
+
+    getBody #+ [ element button, element msg ]
+
     onElementId "button" "click" $ do
         element msg # set UI.text "I have been clicked!"
 
@@ -35,5 +35,5 @@ onElementId
     -> UI ()
 onElementId elid event handler = do
     window   <- askWindow
-    exported <- ffiExport (runUI window handler >> return ())
+    exported <- ffiExport (runDynamic (runUI window handler) >> return ())
     runFunction $ ffi "$(%1).on(%2,%3)" ("#"++elid) event exported

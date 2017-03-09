@@ -38,7 +38,7 @@ module Graphics.UI.Threepenny.Core (
     -- | For a list of predefined attributes, see "Graphics.UI.Threepenny.Attributes".
     (#), (#.),
     Attr, WriteAttr, ReadAttr, ReadWriteAttr(..),ReadWriteAttrMIO(..),
-    set, sink,sinkDiff, get, mkReadWriteAttr, mkWriteAttr, mkReadAttr,
+    set, sink,sinkE,sinkDiff, get, mkReadWriteAttr, mkWriteAttr, mkReadAttr,
     bimapAttr, fromObjectProperty,
 
     -- * Widgets
@@ -371,6 +371,19 @@ sinkDiff attr bi mx = do
         Reactive.onEventDyn bdiff  $ \i -> void $ runUI window $ set' attr i x
         return ()
     return x
+
+sinkE :: Eq i => ReadWriteAttr x i o -> Tidings i -> UI x -> UI x
+sinkE attr bi mx = do
+    x <- mx
+    window <- askWindow
+    liftIOLater $ do
+        i <- currentValue (facts bi)
+        runUI window $ set' attr i x
+        let bdiff =  rumors bi
+        Reactive.onEventDyn bdiff  $ \i -> void $ runUI window $ set' attr i x
+        return ()
+    return x
+
 
 
 -- | Get attribute value.

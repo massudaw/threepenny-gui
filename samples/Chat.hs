@@ -37,7 +37,7 @@ setup globalMsgs window = do
     (nickRef, nickname) <- mkNickname
     messageArea         <- mkMessageArea msgs nickRef
 
-    getBody window #+
+    getBody #+
         [ UI.div #. "header"   #+ [string "Threepenny Chat"]
         , UI.div #. "gradient"
         , viewSource
