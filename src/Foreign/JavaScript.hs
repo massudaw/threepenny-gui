@@ -89,7 +89,10 @@ unsafeCreateJSObject :: Window -> JSFunction NewJSObject -> IO JSObject
 unsafeCreateJSObject w f = do
     g <- wrapImposeStablePtr w f
     atomically . bufferRunEval w =<< toCode g
-    marshalResult g w JSON.Null
+    o <- marshalResult g w JSON.Null
+    cid  <- unprotectedGetCoupon o
+    addFinalizer o (atomically $ modifyTVar (wCallBufferMap  w) (\(k,v) -> (Set.delete (traceShow ("finalize",cid)cid) k ,v)))
+    return o
 
 -- | Call a JavaScript function and wait for the result.
 callFunction :: Window -> JSFunction a -> IO a

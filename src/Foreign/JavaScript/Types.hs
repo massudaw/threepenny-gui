@@ -191,18 +191,10 @@ data CallBufferMode
     -- which is finally sent whenever `callFunction` or
     -- `flushCallBuffer` are used.
 
-flushBuffer t = do
-  r <- readTVar t
-  writeTVar t id
-  return r
-
 type CallBuffer = ([String] -> [String])
-data ElementStatus
-  = Delayed (TVar CallBuffer)
-  | Binded  CallBuffer [STM CallBuffer]
-  | Rendered
 
 type Set = Set.HashSet
+
 type BufferMap k v = [(Set k, v)]
 
 insertSBM :: Ord k => Set k -> v -> BufferMap k v -> BufferMap k v
@@ -228,7 +220,7 @@ data Window = Window
     { runEval        :: String -> STM ()
     , callEval       :: TMVar (Either String JSON.Value) -> String -> STM ()
     , wCallBuffer     :: TVar CallBuffer
-    , wCallBufferMap  :: TVar (Set Coupon , [(Set Coupon , TVar CallBuffer)])
+    , wCallBufferMap  :: TVar (Set Coupon , BufferMap Coupon (TVar CallBuffer))
     , wCallBufferMode :: TVar CallBufferMode
 
     , timestamp      :: IO ()
