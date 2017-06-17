@@ -72,7 +72,7 @@ Haskell.createWebSocket = function (url0, receive) {
     ws.send(compress(JSON.stringify(json)));
   };
   // Close the connection
-  that.close = function () { ws.send(compress("quit")); };
+  that.close = function () { ws.send(compress("-1")); };
   
   return that;
 };
