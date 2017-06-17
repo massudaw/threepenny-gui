@@ -44,6 +44,8 @@ handleEvent w@(Window{..}) (name, args) = do
 
 type Result = Either String JSON.Value
 
+appendBuffer = intercalate ";" . ($[])
+
 -- | Event loop for a browser window.
 -- Supports concurrent invocations of `runEval` and `callEval`.
 eventLoop :: (Window -> IO (IO ())) ->  (Comm -> IO ())
@@ -76,10 +78,10 @@ eventLoop init comm = do
     let onDisconnect m = atomically $ takeTMVar disconnect >>= putTMVar disconnect . (>>m)
 
     w0 <- newPartialWindow
-    let w = w0 { runEval        = run  . RunEval
-               , callEval       = (\ref -> call ref . CallEval)
+    let w = w0 { runEval        = maybe (return ()) (run  . RunEval) . nonEmpty . appendBuffer
+               , callEval       = (\ref -> call ref . CallEval. appendBuffer)
                , debug        = debug
-               , timestamp    = atomically $ run (Timestamp)
+               , timestamp    = atomically $ run Timestamp
                , onDisconnect = onDisconnect
                }
 
@@ -183,7 +185,7 @@ fromJSStablePtr js w@(Window{..}) = do
         Nothing -> do
             ptr <- newRemotePtr coupon (JSPtr coupon) wJSObjects
             addFinalizer ptr $
-              atomically $ runEval ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')")
+              atomically $ runEval (("Haskell.freeStablePtr('" ++ show coupon ++ "')"):)
             return ptr
 
 
@@ -191,7 +193,7 @@ flushCallBufferSTM :: Window -> STM ()
 flushCallBufferSTM w@Window{..} = do
         code <- readTVar wCallBuffer
         writeTVar wCallBuffer id
-        traverse runEval $ nonEmpty $  intercalate ";"  (code [])
+        runEval  code
         return ()
 
 ifOpen comm stm = do

@@ -37,7 +37,7 @@ import Data.List (any,intercalate)
 import Data.Monoid
 import Data.Maybe (isJust)
 import qualified Data.Map as M
-import qualified Data.HashSet as Set
+import qualified Data.Set as Set
 import qualified Data.Foldable as F
 import Control.Monad
 import Data.Time
@@ -91,7 +91,7 @@ unsafeCreateJSObject w f = do
     atomically . bufferRunEval w =<< toCode g
     o <- marshalResult g w JSON.Null
     cid  <- unprotectedGetCoupon o
-    addFinalizer o (atomically $ modifyTVar (wCallBufferMap  w) (\(k,v) -> (Set.delete (traceShow ("finalize",cid)cid) k ,v)))
+    addFinalizer o (atomically $ modifyTVar (wCallBufferMap  w) (\(k,v) -> (Set.delete cid k ,v)))
     return o
 
 -- | Call a JavaScript function and wait for the result.
@@ -143,7 +143,7 @@ flushCallEvalBuffer :: Window -> TMVar Result -> STM ()
 flushCallEvalBuffer w@Window{..} ref = do
         code <- readTVar wCallBuffer
         writeTVar wCallBuffer  id
-        traverse (callEval ref) $  nonEmpty (intercalate ";"  ( code []))
+        callEval ref  code
         return ()
 
 
@@ -152,11 +152,14 @@ flushCallEvalBuffer w@Window{..} ref = do
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
 bufferCallEval :: Window -> TMVar Result -> String -> STM ()
-bufferCallEval w@Window{..} ref icode =  do
+bufferCallEval w m c = bufferCallEval' w m (c:)
+
+bufferCallEval' :: Window -> TMVar Result -> CallBuffer -> STM ()
+bufferCallEval' w@Window{..} ref icode =  do
   action <- do
         mode <- readTVar wCallBufferMode
         let buffer = do
-                modifyTVar wCallBuffer (. (icode:))
+                modifyTVar wCallBuffer (. icode)
                 return Nothing
 
         case mode of
@@ -171,7 +174,7 @@ bufferCallEval w@Window{..} ref icode =  do
 forceObject :: Window -> JSObject -> IO ()
 forceObject  w@Window{..} top = do
   root <- unprotectedGetCoupon top
-  atomically $ do
+  void $ atomically $ do
     action <- do
          mode <- readTVar wCallBufferMode
          let buffer = do
@@ -192,18 +195,13 @@ forceObject  w@Window{..} top = do
               BufferRun -> buffer
               i-> do
                 return $ Just id
-    case action of
-      Nothing -> return ()
-      Just i -> do
-        case i [] of
-          [] -> return ()
-          l -> bufferRunEval w (intercalate ";" l)
+    traverse (bufferRunEval' w) action
 
 flushChildren :: Window -> JSObject -> JSObject -> IO ()
 flushChildren w@Window{..} top child = do
   root <- unprotectedGetCoupon top
   childs <- unprotectedGetCoupon child
-  atomically $ do
+  void $ atomically $ do
     mode <- readTVar wCallBufferMode
     let childFun c = do
             (rendered, map) <- readTVar wCallBufferMap
@@ -231,7 +229,7 @@ flushChildren w@Window{..} top child = do
                    Just (kc,act) -> do
                      case val of
                        Just (k,v) ->  do
-                         modifyTVar v  (\i -> (\e -> e ++ i [] ++  act []))
+                         modifyTVar v  (act .)
                          out <- readTVar v
                          writeTVar wCallBufferMap (rendered , moveAtBM k childs map)
                          return Nothing
@@ -253,21 +251,18 @@ flushChildren w@Window{..} top child = do
           BufferRun -> buffer
           i-> do
             return $ Just id
-    case action of
-      Nothing -> do
-        return ()
-      Just i -> do
-        case i [] of
-          [] -> return ()
-          l -> bufferRunEval w (intercalate ";" l)
+    traverse (bufferRunEval' w ) action
 
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
 bufferRunEvalMethod :: Window -> JSObject -> String -> IO ()
-bufferRunEvalMethod  w@Window{..} js icode = do
+bufferRunEvalMethod w j s = bufferRunEvalMethod' w j (s:)
+
+bufferRunEvalMethod' :: Window -> JSObject -> CallBuffer -> IO ()
+bufferRunEvalMethod'  w@Window{..} js icode = do
   coupon <- unprotectedGetCoupon js
-  atomically $ do
+  void $ atomically $ do
     mode <- readTVar wCallBufferMode
     let buffer = do
              (rendered,map )<- readTVar wCallBufferMap
@@ -276,31 +271,26 @@ bufferRunEvalMethod  w@Window{..} js icode = do
                else  do
                   case findBM coupon map of
                     Just (k,ref) -> do
-                      modifyTVar ref ((icode:). )
+                      modifyTVar ref (icode. )
                     Nothing -> do
-                      ref <- newTVar (const [icode])
+                      ref <- newTVar icode
                       writeTVar wCallBufferMap (rendered,insertBM coupon ref map)
                   return Nothing
     action <-   case mode of
           BufferAll ->  buffer
           BufferRun -> buffer
           i-> do
-            return $ Just icode
-    case action of
-      Nothing ->do
-        return ()
-      Just i -> do
-        bufferRunEval w i
+            return $ Just (icode)
+    traverse (bufferRunEval' w) action
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
-bufferRunEval :: Window -> String -> STM ()
-bufferRunEval w@Window{..} icode = do
+bufferRunEval w icode = bufferRunEval' w (icode:)
+bufferRunEval' :: Window -> CallBuffer -> STM ()
+bufferRunEval' w@Window{..} icode = do
       mode <- readTVar wCallBufferMode
       let buffer = do
-              msg <- readTVar wCallBuffer
-              writeTVar wCallBuffer (\i -> do
-                msg (icode :i) )
+              modifyTVar wCallBuffer (.icode)
               return Nothing
       o <- case mode of
             BufferAll ->  buffer

@@ -51,6 +51,7 @@ instance (ToJSON a ,ToJSON b,ToJSON c , ToJSON d) => ToJS (a,b,c,d) where render
 instance ToJS Float      where render   = render . JSON.toJSON
 instance ToJS Double     where render   = render . JSON.toJSON
 instance ToJS Int        where render   = jsCode . show
+instance ToJS Integer        where render   = jsCode . show
 instance ToJS Bool       where render b = jsCode $ if b then "true" else "false"
 instance ToJS JSON.Value where render   = jsCode . showJSON
 instance ToJS T.Text     where render   = render . JSON.String

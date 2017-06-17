@@ -19,7 +19,7 @@ import Prelude hiding (lookup)
 import Control.Monad
 import           Control.Concurrent
 import qualified Data.Text             as T
-import qualified Data.HashMap.Strict              as Map
+import qualified Data.IntMap as Map
 import Data.Functor
 import Data.IORef
 
@@ -53,7 +53,7 @@ mkWeakIORefValue r@(GHC.IORef (GHC.STRef r#)) v (GHC.IO f) = GHC.IO $ \s ->
   case GHC.mkWeak# r# v f s of (# s1, w #) -> (# s1, GHC.Weak w #)
 #endif
 
-type Map = Map.HashMap
+type Map = Map.IntMap
 
 {-----------------------------------------------------------------------------
     Types
@@ -64,8 +64,9 @@ type Map = Map.HashMap
 -- be sent to or received from a remote program.
 --
 -- The data structure 'Vendor' associates 'Coupon's to 'RemotPtr' objects.
-type Coupon = T.Text
+type Coupon = Int
 
+type Store v = Map.IntMap v
 
 -- | A 'RemotePtr' is a pointer to a foreign object.
 --
@@ -97,8 +98,8 @@ data SomeWeak = forall a. SomeWeak (Weak a)
 -- A single 'RemotePtr' will always be associated with the same 'Coupon'.
 
 data Vendor a = Vendor
-    { coupons :: MVar (Map Coupon (Weak (RemotePtr a)))
-    , counter :: MVar [Integer]
+    { coupons :: MVar (Store (Weak (RemotePtr a)))
+    , counter :: MVar [Coupon]
     }
 
 {-----------------------------------------------------------------------------
@@ -124,7 +125,7 @@ lookup coupon Vendor{..} = do
 -- certainly not on a remote machine.
 newCoupon :: Vendor a -> IO Coupon
 newCoupon Vendor{..} =
-    T.pack . show <$> modifyMVar counter (\(n:ns) -> return (ns,n))
+    modifyMVar counter (\(n:ns) -> return (ns,n))
 
 -- | Create a new 'RemotePtr' from a 'Coupon' and register it with a 'Vendor'.
 newRemotePtr :: Coupon -> a -> Vendor a -> IO (RemotePtr a)

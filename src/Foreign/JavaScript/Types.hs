@@ -16,10 +16,9 @@ import           Data.Text
 import           Data.Typeable
 import           System.IO                       (stderr)
 import qualified Data.Map as Map
-import qualified Data.HashSet as Set
+import qualified Data.Set as Set
 import qualified Data.List as L
 
-import Data.Hashable
 import Foreign.RemotePtr
 
 {-----------------------------------------------------------------------------
@@ -170,7 +169,7 @@ type Event        = (Coupon, JSON.Value, Consistency)
 type HsEvent      = RemotePtr (JSON.Value -> IO ())
 
 quit :: Event
-quit = ("quit", JSON.Null, Consistent)
+quit = (-1, JSON.Null, Consistent)
 
 -- | Specification of how JavaScript functions should be called.
 --
@@ -193,14 +192,14 @@ data CallBufferMode
 
 type CallBuffer = ([String] -> [String])
 
-type Set = Set.HashSet
+type Set = Set.Set
 
 type BufferMap k v = [(Set k, v)]
 
 insertSBM :: Ord k => Set k -> v -> BufferMap k v -> BufferMap k v
 insertSBM k v l = ( k ,v):l
 
-insertBM :: Hashable k => k -> v -> BufferMap k v -> BufferMap k v
+insertBM :: Ord k => k -> v -> BufferMap k v -> BufferMap k v
 insertBM k v l = (Set.singleton k ,v):l
 
 deleteBM k l = L.deleteBy (\(i,_) (l,_) -> not $ Set.null $ Set.intersection i l ) (Set.singleton k,undefined) l
@@ -210,15 +209,15 @@ moveAtBM at k  l = ins
         Just (kdel ,_)= findBM k l
         ins = fmap (\(ko,l) -> if not $ Set.null $ Set.intersection ko at then (Set.union kdel ko ,l) else (ko,l)) del
 
-findBM :: (Eq k ,Hashable k) => k -> BufferMap k v -> Maybe (Set k,v)
+findBM :: Ord k => k -> BufferMap k v -> Maybe (Set k,v)
 findBM k = L.find ((Set.member k).fst)
 emptyBM :: BufferMap k v
 emptyBM = []
 
 -- | Representation of a browser window.
 data Window = Window
-    { runEval        :: String -> STM ()
-    , callEval       :: TMVar (Either String JSON.Value) -> String -> STM ()
+    { runEval        :: CallBuffer -> STM ()
+    , callEval       :: TMVar (Either String JSON.Value) -> CallBuffer -> STM ()
     , wCallBuffer     :: TVar CallBuffer
     , wCallBufferMap  :: TVar (Set Coupon , BufferMap Coupon (TVar CallBuffer))
     , wCallBufferMode :: TVar CallBufferMode
@@ -237,7 +236,7 @@ data Window = Window
 
 newPartialWindow :: IO Window
 newPartialWindow = do
-    ptr <- newRemotePtr "" () =<< newVendor
+    ptr <- newRemotePtr (-1) () =<< newVendor
     b1  <- newTVarIO id
     b1i  <- newTVarIO (Set.empty ,[])
     b2  <- newTVarIO BufferRun
