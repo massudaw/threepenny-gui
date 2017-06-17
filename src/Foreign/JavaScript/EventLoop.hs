@@ -23,6 +23,9 @@ import qualified System.Mem
 import Foreign.RemotePtr             as Foreign
 import Foreign.JavaScript.CallBuffer
 import Foreign.JavaScript.Types
+import Data.Time
+import GHC.Conc
+import Debug.Trace
 
 rebug :: IO ()
 #ifdef REBUG
@@ -54,6 +57,7 @@ eventLoop init server comm = void $ do
     -- The thread `multiplexer` reads from the client and
     --   sorts the messages into the appropriate queue.
     events      <- newTQueueIO
+    lastwrite <- newTVarIO Nothing
     results     <- newTQueueIO :: IO (TQueue Result)
     -- The thread `handleCalls` executes FFI calls
     --    from the Haskell side in order.
@@ -121,9 +125,21 @@ eventLoop init server comm = void $ do
                         result <- readTQueue results
                         putTMVar ref result
                     Nothing  -> return ()
-    let flushTimeout = forever ( do
-            threadDelay (300*1000)
-            flushBuffer comm w )
+<<<<<<< HEAD
+||||||| parent of 742e75f... mend
+    let flushTimeout = forever (do
+            v <- flushDirtyBuffer comm w
+            case v of
+              Left i -> threadDelay (i *1000)
+              Right (i,code') -> do
+                runEval w $ code' []
+                threadDelay (i *1000)
+                )
+
+
+=======
+
+>>>>>>> 742e75f... mend
     -- Receive events from client and handle them in order.
     let handleEvents = do
             me <- atomically $ do
@@ -167,8 +183,23 @@ eventLoop init server comm = void $ do
 
 -- | Thread that periodically flushes the call buffer
 flushCallBufferPeriodically :: Window -> IO ()
-flushCallBufferPeriodically w =
-    forever $ threadDelay (flushPeriod*1000) >> flushCallBuffer w
+flushCallBufferPeriodically w@Window{..} = forever $ do
+  b <- atomically $ do
+    (tl,ix) <-  takeTMVar wCallBufferStats
+    FlushPeriodically max_flush_delay max_buffer_size <- readTVar wCallBufferMode
+    tc <- unsafeIOToSTM getCurrentTime
+    let delta = diffUTCTime tc tl * 1000
+    if delta > fromIntegral max_flush_delay || ix > max_buffer_size
+       then return (Right (max_flush_delay - ceiling delta))
+       else do
+        putTMVar wCallBufferStats (tl,ix)
+        return $ Left max_flush_delay
+  case b of
+    Right delta -> do
+        flushCallBuffer w
+        threadDelay (delta*1000)
+    Left delta ->
+        threadDelay (delta*1000)
 
 
 {-----------------------------------------------------------------------------
@@ -199,20 +230,3 @@ fromJSStablePtr js w@(Window{..}) = do
             addFinalizer ptr $
                 runEval ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')")
             return ptr
-
-
-flushBuffer :: Comm -> Window -> IO ()
-flushBuffer comm w@Window{..} = do
-    code' <- atomicallyIfOpen comm $ do
-        code <- readTVar wCallBuffer
-        writeTVar wCallBuffer id
-        return code
-    runEval $ code' []
-
-atomicallyIfOpen comm stm = do
-            r <- atomically $ do
-                b <- readTVar (commOpen comm)
-                if b then fmap Right stm else return (Left ())
-            case r of
-                Right a -> return a
-                Left  _ -> error "Foreign.JavaScript: Browser <-> Server communication broken."
