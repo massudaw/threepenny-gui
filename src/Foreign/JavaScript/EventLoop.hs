@@ -48,7 +48,7 @@ type Result = Either String JSON.Value
 eventLoop :: (Window -> IO void) -> (Server -> Comm -> IO ())
 eventLoop init server comm = void $ do
     -- To support concurrent FFI calls, we make three threads.
-    -- The thread `multiplexer` reads from the client and 
+    -- The thread `multiplexer` reads from the client and
     --   sorts the messages into the appropriate queue.
     events      <- newTQueueIO
     results     <- newTQueueIO :: IO (TQueue Result)
@@ -118,7 +118,9 @@ eventLoop init server comm = void $ do
                         result <- readTQueue results
                         putTMVar ref result
                     Nothing  -> return ()
-
+    let flushTimeout = forever ( do
+            threadDelay (300*1000)
+            flushBuffer comm w )
     -- Receive events from client and handle them in order.
     let handleEvents = do
             me <- atomically $ do
@@ -150,10 +152,11 @@ eventLoop init server comm = void $ do
         -- run `multiplexer` and `handleCalls` concurrently
         withAsync multiplexer $ \_ ->
         withAsync handleCalls $ \_ ->
+        withAsync flushTimeout $ \_ ->
         E.finally (init w >> handleEvents) $ do
             putStrLn "Foreign.JavaScript: Browser window disconnected."
             -- close communication channel if still necessary
-            commClose comm                
+            commClose comm
             -- trigger the `disconnect` event
             -- FIXME: Asynchronous exceptions should not be masked during the disconnect handler
             m <- atomically $ readTVar disconnect
@@ -188,3 +191,19 @@ fromJSStablePtr js w@(Window{..}) = do
                 runEval ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')")
             return ptr
 
+
+flushBuffer :: Comm -> Window -> IO ()
+flushBuffer comm w@Window{..} = do
+    code' <- atomicallyIfOpen comm $ do
+        code <- readTVar wCallBuffer
+        writeTVar wCallBuffer id
+        return code
+    runEval $ code' []
+
+atomicallyIfOpen comm stm = do
+            r <- atomically $ do
+                b <- readTVar (commOpen comm)
+                if b then fmap Right stm else return (Left ())
+            case r of
+                Right a -> return a
+                Left  _ -> error "Foreign.JavaScript: Browser <-> Server communication broken."
