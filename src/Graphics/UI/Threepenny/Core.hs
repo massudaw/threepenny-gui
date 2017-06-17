@@ -48,7 +48,7 @@ module Graphics.UI.Threepenny.Core (
     -- | Direct interface to JavaScript in the browser window.
     debug, timestamp,
     ToJS(..), FromJS(..),JS.JSCode(..),FFI,
-    JSFunction, JS.JSAsync(..),ffi,async,event, runFunction, callFunction,ffiAttr,ffiAttrRead,ffiAttrWrite,ffiAttrCall,JS.emptyFunction,
+    JSFunction, JS.JSAsync(..),ffi,async,event, runFunction, runFunctionDelayed, callFunction,ffiAttr,ffiAttrRead,ffiAttrWrite,ffiAttrCall,JS.emptyFunction,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
     ffiExport,
 
@@ -120,22 +120,22 @@ children = mkWriteAttr set
 -- | Child elements of a given element as a HTML string.
 html :: WriteAttr Element String
 html = mkWriteAttr $ \s el ->
-    runFunction $ ffi "$(%1).html(%2)" el s
+  runFunction $ ffi "$(%1).html(%2)" el s
 
 -- | HTML attributes of an element.
 attr :: String -> WriteAttr Element String
 attr name = mkWriteAttr $ \s el ->
-    runFunction $ ffi "$(%1).attr(%2,%3)" el name s
+  runFunction $ ffi "$(%1).attr(%2,%3)" el name s
 
 attrJS :: ToJS a => String -> WriteAttr Element a
 attrJS name = mkWriteAttr $ \s el ->
-    runFunction $ ffi "$(%1).attr(%2,%3)" el name s
+  runFunction $ ffi "$(%1).attr(%2,%3)" el name s
 
 
 -- | Set CSS style of an Element
 style :: WriteAttr Element [(String,String)]
 style = mkWriteAttr $ \xs el -> forM_ xs $ \(name,val) ->
-    runFunction $ ffi "%1.style[%2] = %3" el name val
+  runFunction $ ffi "%1.style[%2] = %3" el name val
 
 -- | Value attribute of an element.
 -- Particularly relevant for control widgets like 'input'.
@@ -149,7 +149,7 @@ valueFFI = ffiAttr "$(%1).val()" "$(%2).val(%1)"
 -- | Text content of an element.
 text :: WriteAttr Element String
 text = mkWriteAttr $ \s el ->
-    runFunction $ ffi "$(%1).text(%2)" el s
+  runFunctionDelayed el $ ffi "$(%1).text(%2)" el s
 
 -- | Make a @span@ element with a given text content.
 string :: String -> UI Element
@@ -157,22 +157,30 @@ string s = mkElement "span" # set text s
 
 -- | Get the head of the page.
 getHead :: UI Element
-getHead  = fromJSObject =<< callFunction (ffi "document.head")
+getHead  = do
+  el <- (fromJSObject =<< callFunction (ffi "document.head"))
+  forceElement el
+  return el
 
 addHead :: [UI Element] -> UI ()
 addHead  mys = do
   ys <- sequence mys
   mapM (\i -> runFunction (ffi "document.head.append(%1)" i)) ys
+  mapM forceElement ys
   return ()
 
 -- | Get the body of the page.
 getBody :: UI Element
-getBody = fromJSObject =<< callFunction (ffi "document.body")
+getBody = do
+  el <- (fromJSObject =<< callFunction (ffi "document.body"))
+  forceElement el
+  return el
 
 addBody :: [UI Element] -> UI ()
 addBody  mys = do
   ys <- sequence mys
   mapM (\i -> runFunction (ffi "document.body.append(%1)" i)) ys
+  mapM forceElement ys
   return ()
 
 -- | Get all elements of the given tag name.
@@ -409,15 +417,15 @@ mkWriteAttr set = mkReadWriteAttr (\_ -> return ()) set
 fromJQueryProp :: String -> (JSON.Value -> a) -> (a -> JSON.Value) -> Attr Element a
 fromJQueryProp name from to = mkReadWriteAttr get set
     where
-    set v el = runFunction $ ffi "$(%1).prop(%2,%3)" el name (to v)
-    get   el = fmap from $ callFunction $ ffi "$(%1).prop(%2)" el name
+      set v el = runFunctionDelayed el $ ffi "$(%1).prop(%2,%3)" el name (to v)
+      get   el = fmap from $ callFunction $ ffi "$(%1).prop(%2)" el name
 
 -- | Turn a JavaScript object property @.prop = ...@ into an attribute.
 fromObjectProperty :: (FromJS a, ToJS a, FFI (JSFunction a)) => String -> Attr Element a
 fromObjectProperty name = mkReadWriteAttr get set
     where
-    set v el = runFunction  $ ffi ("%1." ++ name ++ " = %2") el v
-    get   el = callFunction $ ffi ("%1." ++ name) el
+      set v el = runFunctionDelayed el  $ ffi ("%1." ++ name ++ " = %2") el v
+      get   el = callFunction $ ffi ("%1." ++ name) el
 
 {-----------------------------------------------------------------------------
     Widget class

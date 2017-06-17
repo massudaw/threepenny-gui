@@ -11,12 +11,12 @@ module Graphics.UI.Threepenny.Internal (
     UI, runUI, liftIOLater, askWindow,ui,
 
     FFI, FromJS, ToJS, JSFunction, JSObject, ffi,async,event,
-    runFunction, callFunction,
+    runFunction, runFunctionDelayed , callFunction,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
     ffiExport, debug, timestamp,
 
     Element(..), fromJSObject, getWindow,
-    mkElementNamespace, mkElement, delete, appendChild, clearChildren,
+    mkElementNamespace, mkElement, delete, appendChild, clearChildren,forceElement,
 
     EventData, domEvent,domEventSafe,domEventAsync,domEventH, unsafeFromJSON,
     ) where
@@ -45,7 +45,7 @@ import Reactive.Threepenny    (Dynamic)
 import System.IO.Unsafe
 import System.Mem (performGC)
 import Foreign.JavaScript hiding
-    (runFunction, callFunction, setCallBufferMode, flushCallBuffer
+    (runFunction,runFunctionDelayed, callFunction, setCallBufferMode, flushCallBuffer
     ,debug, timestamp, Window)
 
 data Wrap f = forall a . Wrap (f a)
@@ -315,6 +315,10 @@ clearChildren element = liftJSWindow $ \w -> do
         JS.runFunction w $ ffi "$(%1).contents().detach()" el
         Foreign.clearReachable (elChildren element)
 
+forceElement :: Element -> UI ()
+forceElement el = liftJSWindow $ \w -> do
+  JS.forceObject w (toJSObject el)
+
 -- | Append a child element.
 appendChild :: Element -> Element -> UI ()
 appendChild parent child = liftJSWindow $ \w -> do
@@ -322,6 +326,7 @@ appendChild parent child = liftJSWindow $ \w -> do
     -- /previous/ parent.
     Foreign.addReachable (elChildren parent) (toJSObject child)
     JS.runFunction w $ ffi "$(%1).append($(%2))" (toJSObject parent) (toJSObject child)
+    JS.flushChildren w (toJSObject parent) (toJSObject child)
 
 
 {-----------------------------------------------------------------------------
@@ -409,6 +414,8 @@ liftIOLater x = UI $ Monad.tell [x]
 runFunction :: JSFunction () -> UI ()
 runFunction fun = liftJSWindow $ \w -> JS.runFunction w fun
 
+runFunctionDelayed :: Element -> JSFunction () -> UI ()
+runFunctionDelayed el fun = liftJSWindow $ \w -> JS.runFunctionDelayed w (toJSObject el) fun
 -- | Run the given JavaScript function and wait for results. Blocks.
 --
 -- The client window uses JavaScript's @eval()@ function to run the code.

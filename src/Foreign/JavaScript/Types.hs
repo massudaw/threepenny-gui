@@ -15,7 +15,11 @@ import           Data.String
 import           Data.Text
 import           Data.Typeable
 import           System.IO                       (stderr)
+import qualified Data.Map as Map
+import qualified Data.HashSet as Set
+import qualified Data.List as L
 
+import Data.Hashable
 import Foreign.RemotePtr
 
 {-----------------------------------------------------------------------------
@@ -187,12 +191,44 @@ data CallBufferMode
     -- which is finally sent whenever `callFunction` or
     -- `flushCallBuffer` are used.
 
+flushBuffer t = do
+  r <- readTVar t
+  writeTVar t id
+  return r
+
+type CallBuffer = ([String] -> [String])
+data ElementStatus
+  = Delayed (TVar CallBuffer)
+  | Binded  CallBuffer [STM CallBuffer]
+  | Rendered
+
+type Set = Set.HashSet
+type BufferMap k v = [(Set k, v)]
+
+insertSBM :: Ord k => Set k -> v -> BufferMap k v -> BufferMap k v
+insertSBM k v l = ( k ,v):l
+
+insertBM :: Hashable k => k -> v -> BufferMap k v -> BufferMap k v
+insertBM k v l = (Set.singleton k ,v):l
+
+deleteBM k l = L.deleteBy (\(i,_) (l,_) -> not $ Set.null $ Set.intersection i l ) (Set.singleton k,undefined) l
+
+moveAtBM at k  l = ins
+  where del = L.deleteBy (\(i,_) (l,_) -> not $ Set.null $ Set.intersection i l ) (Set.singleton k,undefined) l
+        Just (kdel ,_)= findBM k l
+        ins = fmap (\(ko,l) -> if not $ Set.null $ Set.intersection ko at then (Set.union kdel ko ,l) else (ko,l)) del
+
+findBM :: (Eq k ,Hashable k) => k -> BufferMap k v -> Maybe (Set k,v)
+findBM k = L.find ((Set.member k).fst)
+emptyBM :: BufferMap k v
+emptyBM = []
+
 -- | Representation of a browser window.
 data Window = Window
-    { runEval        :: String -> IO ()
-    , callEval       :: TMVar (Either String JSON.Value) -> String -> IO ()
-
-    , wCallBuffer     :: TVar ([String] -> [String])
+    { runEval        :: String -> STM ()
+    , callEval       :: TMVar (Either String JSON.Value) -> String -> STM ()
+    , wCallBuffer     :: TVar CallBuffer
+    , wCallBufferMap  :: TVar (Set Coupon , [(Set Coupon , TVar CallBuffer)])
     , wCallBufferMode :: TVar CallBufferMode
 
     , timestamp      :: IO ()
@@ -211,15 +247,21 @@ newPartialWindow :: IO Window
 newPartialWindow = do
     ptr <- newRemotePtr "" () =<< newVendor
     b1  <- newTVarIO id
+    b1i  <- newTVarIO (Set.empty ,[])
     b2  <- newTVarIO BufferRun
-    let nop = const $ return ()
-    Window nop undefined b1 b2 (return ()) nop nop ptr <$> newVendor <*> newVendor
+    let
+      nop :: Monad m => b -> m ()
+      nop = const $ return ()
+    Window nop undefined b1 b1i b2 (return ()) nop nop ptr <$> newVendor <*> newVendor
 
 -- | For the purpose of controlling garbage collection,
 -- every 'Window' as an associated 'RemotePtr' that is alive
 -- as long as the external JavaScript connection is alive.
 root :: Window -> RemotePtr ()
 root = wRoot
+
+nonEmpty [] = Nothing
+nonEmpty l = Just l
 
 {-----------------------------------------------------------------------------
     Marshalling

@@ -2,7 +2,7 @@
 {-# LANGUAGE RecursiveDo #-}
 module Foreign.JavaScript.EventLoop (
     eventLoop,
-    runEval, callEval, debug, onDisconnect,
+    runEval, callEval, debug, onDisconnect,flushCallBufferSTM,
     newHandler, fromJSStablePtr,
     Result
     ) where
@@ -22,6 +22,7 @@ import qualified System.Mem
 import Control.Concurrent
 import Foreign.RemotePtr        as Foreign
 import Foreign.JavaScript.Types
+import Debug.Trace
 
 rebug :: IO ()
 #ifdef REBUG
@@ -63,12 +64,12 @@ eventLoop init comm = do
     -- Otherwise, throw an exception.
 
     -- FFI calls are made by writing to the `calls` queue.
-    let run msg = do
-           atomicallyIfOpen comm $ writeTQueue calls (Nothing , msg)
-        call ref  msg = do
-           atomicallyIfOpen comm $ writeTQueue calls (Just ref, msg)
-        debug    s = do
-           atomicallyIfOpen comm$ writeServer comm $ Debug s
+    let run msg =
+          ifOpen comm $ writeTQueue calls (Nothing , msg)
+        call ref  msg =
+          ifOpen comm $ writeTQueue calls (Just ref, msg)
+        debug    s =
+          atomically $ ifOpen comm$ writeServer comm $ Debug s
 
     -- We also send a separate event when the client disconnects.
     disconnect <- newTMVarIO $ return ()
@@ -78,7 +79,7 @@ eventLoop init comm = do
     let w = w0 { runEval        = run  . RunEval
                , callEval       = (\ref -> call ref . CallEval)
                , debug        = debug
-               , timestamp    = run (Timestamp)
+               , timestamp    = atomically $ run (Timestamp)
                , onDisconnect = onDisconnect
                }
 
@@ -104,7 +105,7 @@ eventLoop init comm = do
 
     let flushTimeout = forever ( do
             threadDelay (300*1000)
-            flushCallBuffer comm w )
+            atomically $ ifOpen comm  $ flushCallBufferSTM w )
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             (ref,msg) <- atomically $ do
@@ -182,19 +183,19 @@ fromJSStablePtr js w@(Window{..}) = do
         Nothing -> do
             ptr <- newRemotePtr coupon (JSPtr coupon) wJSObjects
             addFinalizer ptr $
-              runEval ( ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')"))
+              atomically $ runEval ("Haskell.freeStablePtr('" ++ T.unpack coupon ++ "')")
             return ptr
 
-flushCallBuffer :: Comm -> Window -> IO ()
-flushCallBuffer comm w@Window{..} = do
-    code' <- atomicallyIfOpen comm $ do
+
+flushCallBufferSTM :: Window -> STM ()
+flushCallBufferSTM w@Window{..} = do
         code <- readTVar wCallBuffer
         writeTVar wCallBuffer id
-        return code
-    runEval $ intercalate ";"  (code' [])
+        traverse runEval $ nonEmpty $  intercalate ";"  (code [])
+        return ()
 
-atomicallyIfOpen comm stm = do
-            r <- atomically $ do
+ifOpen comm stm = do
+            r <- do
                 b <- readTVar (commOpen comm)
                 if b then fmap Right stm else return (Left ())
             case r of
