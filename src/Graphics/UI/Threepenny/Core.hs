@@ -417,14 +417,14 @@ mkWriteAttr set = mkReadWriteAttr (\_ -> return ()) set
 fromJQueryProp :: String -> (JSON.Value -> a) -> (a -> JSON.Value) -> Attr Element a
 fromJQueryProp name from to = mkReadWriteAttr get set
     where
-      set v el = runFunctionDelayed el $ ffi "$(%1).prop(%2,%3)" el name (to v)
+      set v el = runFunction $ ffi "$(%1).prop(%2,%3)" el name (to v)
       get   el = fmap from $ callFunction $ ffi "$(%1).prop(%2)" el name
 
 -- | Turn a JavaScript object property @.prop = ...@ into an attribute.
 fromObjectProperty :: (FromJS a, ToJS a, FFI (JSFunction a)) => String -> Attr Element a
 fromObjectProperty name = mkReadWriteAttr get set
     where
-      set v el = runFunctionDelayed el  $ ffi ("%1." ++ name ++ " = %2") el v
+      set v el = runFunction $ ffi ("%1." ++ name ++ " = %2") el v
       get   el = callFunction $ ffi ("%1." ++ name) el
 
 {-----------------------------------------------------------------------------

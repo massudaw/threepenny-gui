@@ -118,6 +118,7 @@ type Handler a = a -> IO ()
 newEvent :: Dynamic (Event a, Handler a)
 newEvent = do
     (p, fire,fin) <- liftIO$ Prim.newPulse
+    registerDynamic fin
     return (E $ fromPure p, fire)
 
 
@@ -178,7 +179,7 @@ onChangeDyn (B  l e ) hf = do
       register ((,) <$> bv <@> e) (\(~(fin,_))-> sequence_ fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))
       bv <- stepper [] ev
       return bv
-    --registerDynamic ( currentValue bv >>= sequence_ )
+    registerDynamic ( currentValue bv >>= sequence_ )
     return ()
 
 
@@ -417,7 +418,7 @@ onEventDyn  e f =  do
     onEventIO ((,) <$> bfin <@>e ) (\ ~(fin,i) -> sequence_ fin >> (hfin  .snd =<< (runDynamic  ( f i) )) )
     bfin <- stepper [] efin
     return bfin
-  -- registerDynamic $ sequence_ =<< currentValue bfin
+  registerDynamic $ sequence_ =<< currentValue bfin
   return ()
 
 

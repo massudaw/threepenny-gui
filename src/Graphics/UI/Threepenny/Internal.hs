@@ -167,21 +167,25 @@ fromJSObject el = do
         liftIO$ Foreign.addReachable (JS.root $ jsWindow window) el
         fromJSObject0 el window
 
-addEventIO :: String -> JSFunction a -> Bool -> JS.JSObject -> Window -> IO (E.Event a)
+addEventIO :: String -> JSFunction a -> Bool -> JS.JSObject -> Window -> Dynamic (E.Event a)
 addEventIO name fun@(JSFunction _ m ) async el Window{ jsWindow = w, wAllEvents = wAllEvents} = do
     -- Lazily create FRP events whenever they are needed.
     --
-    let initializeEvent (name,_,fun,handler) = do
-            handlerPtr <- JS.exportHandler w handler
+    let initializeEvent (name,fun,handler) = do
+            handlerPtr <- liftIO $ JS.exportHandler w handler
             -- make handler reachable from element
-            Foreign.addReachable el handlerPtr
-            v <- code fun
-            JS.runFunction w $
+            liftIO $ Foreign.addReachable el handlerPtr
+            E.registerDynamic (Foreign.destroy handlerPtr)
+            v <- liftIO $ code fun
+            liftIO . JS.runFunction w $
               ffi "Haskell.bind(%1,%2,%3,%4,%5)" el name handlerPtr (unJSCode v)  async
+            E.registerDynamic $ JS.runFunction w $
+              ffi "Haskell.unbind(%1,%2)" el name
 
-    ((e,h),_) <- E.runDynamic $E.newEvent
-    initializeEvent (name,e,fun,(h <=< m w ))
-    Foreign.withRemotePtr el $ \coupon _ -> do
+
+    (e,h) <- E.newEvent
+    initializeEvent (name,fun,(h <=< m w ))
+    liftIO $ Foreign.withRemotePtr el $ \coupon _ -> do
         ptr <- Foreign.newRemotePtr coupon (Wrap e) wAllEvents
         Foreign.addReachable el ptr
 
@@ -260,7 +264,7 @@ domEventH
     -> UI (E.Event a)
 domEventH name el fun = do
   w <- liftIO $getWindow el
-  liftIO$ addEventIO name fun False (toJSObject el) w
+  ui $ addEventIO name fun False (toJSObject el) w
 
 domEventAsync
     :: String
@@ -273,7 +277,7 @@ domEventAsync
     -> UI (E.Event a)
 domEventAsync name el (JSAsync fun) = do
   w <- liftIO $getWindow el
-  liftIO$ addEventIO name fun True (toJSObject el) w
+  ui $ addEventIO name fun True (toJSObject el) w
 
 
 async :: JSCode

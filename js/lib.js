@@ -47,6 +47,10 @@ Haskell.bind = function (el, eventType, fun,code,async_fun) {
   }
 };
 
+// Unbinding from events
+Haskell.unbind = function (el,eventType){
+  $(el).unbind(eventType);
+};
 
 /////////////////////////////////////////////////////////////////////
 // Canvas API additions.

@@ -152,14 +152,14 @@ flushCallEvalBuffer w@Window{..} ref = do
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
 bufferCallEval :: Window -> TMVar Result -> String -> STM ()
-bufferCallEval w m c = bufferCallEval' w m (c:)
+bufferCallEval w m c = bufferCallEval' w m (snockBuffer c)
 
 bufferCallEval' :: Window -> TMVar Result -> CallBuffer -> STM ()
 bufferCallEval' w@Window{..} ref icode =  do
   action <- do
         mode <- readTVar wCallBufferMode
         let buffer = do
-                modifyTVar wCallBuffer (. icode)
+                modifyTVar wCallBuffer (appendBuffer icode)
                 return Nothing
 
         case mode of
@@ -176,25 +176,18 @@ forceObject  w@Window{..} top = do
   root <- unprotectedGetCoupon top
   void $ atomically $ do
     action <- do
-         mode <- readTVar wCallBufferMode
-         let buffer = do
-               (rendered,map) <- readTVar wCallBufferMap
-               if Set.member root rendered
-                  then  return Nothing
-                  else
-                    case findBM root map of
-                      Just (s,m) ->  do
-                        writeTVar wCallBufferMap (Set.union s rendered,deleteBM root map)
-                        msg <- readTVar m
-                        return $Just msg
-                      Nothing ->   do
-                        writeTVar wCallBufferMap (Set.insert root rendered,map)
-                        return Nothing
-         case mode of
-              BufferAll -> buffer
-              BufferRun -> buffer
-              i-> do
-                return $ Just id
+         (rendered,map) <- readTVar wCallBufferMap
+         if Set.member root rendered
+            then  return Nothing
+            else
+              case findBM root map of
+                Just (s,m) ->  do
+                  writeTVar wCallBufferMap (Set.union s rendered,deleteBM root map)
+                  msg <- readTVar m
+                  return $Just msg
+                Nothing ->   do
+                  writeTVar wCallBufferMap (Set.insert root rendered,map)
+                  return Nothing
     traverse (bufferRunEval' w) action
 
 flushChildren :: Window -> JSObject -> JSObject -> IO ()
@@ -211,86 +204,77 @@ flushChildren w@Window{..} top child = do
                 case findBM c map of
                   Just (k,ref) ->  fmap (Just .(k,))$ readTVar ref
                   Nothing -> return Nothing
-    let buffer = do
-            (rendered,map) <- readTVar wCallBufferMap
-            childActions <- childFun childs
-            if Set.member root rendered
-               then
-                 case childActions of
+    action <- do
+        (rendered,map) <- readTVar wCallBufferMap
+        childActions <- childFun childs
+        if Set.member root rendered
+           then
+             case childActions of
+               Just (k,v) ->  do
+                 writeTVar wCallBufferMap (Set.insert root (Set.union k rendered), deleteBM childs map)
+                 return (Just v)
+               i ->  do
+                 writeTVar wCallBufferMap (Set.insert root  $ Set.insert childs $ rendered, map)
+                 return Nothing
+           else do
+             let val = findBM root map
+             case childActions of
+               Just (kc,act) -> do
+                 case val of
                    Just (k,v) ->  do
-                     writeTVar wCallBufferMap (Set.insert root (Set.union k rendered), deleteBM childs map)
-                     return (Just v)
-                   i ->  do
-                     writeTVar wCallBufferMap (Set.insert root  $ Set.insert childs $ rendered, map)
+                     modifyTVar v  (flip appendBuffer act)
+                     out <- readTVar v
+                     writeTVar wCallBufferMap (rendered , moveAtBM k childs map)
                      return Nothing
-               else do
-                 let val = findBM root map
-                 case childActions of
-                   Just (kc,act) -> do
-                     case val of
-                       Just (k,v) ->  do
-                         modifyTVar v  (act .)
-                         out <- readTVar v
-                         writeTVar wCallBufferMap (rendered , moveAtBM k childs map)
-                         return Nothing
-                       Nothing ->  do
-                         writeTVar wCallBufferMap (rendered , (\(k,v) -> if Set.member childs k then (Set.insert root k,v) else (k,v)) <$> map)
-                         return Nothing
-                   Nothing -> do
-                     case val of
-                       Just (kr,_) -> do
-                         writeTVar wCallBufferMap (rendered , (\(k,v) -> if Set.member root k then (Set.insert childs k,v) else (k,v)) <$>  map)
-                         return Nothing
-                       Nothing ->  do
-                         var <- newTVar id
-                         writeTVar wCallBufferMap (rendered , insertSBM (Set.fromList [root,childs]) var map)
-                         return Nothing
-
-    action <- case mode of
-          BufferAll -> buffer
-          BufferRun -> buffer
-          i-> do
-            return $ Just id
+                   Nothing ->  do
+                     writeTVar wCallBufferMap (rendered , (\(k,v) -> if Set.member childs k then (Set.insert root k,v) else (k,v)) <$> map)
+                     return Nothing
+               Nothing -> do
+                 case val of
+                   Just (kr,_) -> do
+                     writeTVar wCallBufferMap (rendered , (\(k,v) -> if Set.member root k then (Set.insert childs k,v) else (k,v)) <$>  map)
+                     return Nothing
+                   Nothing ->  do
+                     var <- newTVar id
+                     writeTVar wCallBufferMap (rendered , insertSBM (Set.fromList [root,childs]) var map)
+                     return Nothing
     traverse (bufferRunEval' w ) action
 
+appendBuffer xs ys = ys . xs
+snockBuffer e =  (e:)
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
 bufferRunEvalMethod :: Window -> JSObject -> String -> IO ()
-bufferRunEvalMethod w j s = bufferRunEvalMethod' w j (s:)
+bufferRunEvalMethod w j s = bufferRunEvalMethod' w j (snockBuffer s)
 
 bufferRunEvalMethod' :: Window -> JSObject -> CallBuffer -> IO ()
 bufferRunEvalMethod'  w@Window{..} js icode = do
   coupon <- unprotectedGetCoupon js
   void $ atomically $ do
     mode <- readTVar wCallBufferMode
-    let buffer = do
-             (rendered,map )<- readTVar wCallBufferMap
-             if Set.member coupon rendered
-               then return (Just icode)
-               else  do
-                  case findBM coupon map of
-                    Just (k,ref) -> do
-                      modifyTVar ref (icode. )
-                    Nothing -> do
-                      ref <- newTVar icode
-                      writeTVar wCallBufferMap (rendered,insertBM coupon ref map)
-                  return Nothing
-    action <-   case mode of
-          BufferAll ->  buffer
-          BufferRun -> buffer
-          i-> do
-            return $ Just (icode)
+    action <- do
+       (rendered,map )<- readTVar wCallBufferMap
+       if Set.member coupon rendered
+         then return (Just icode)
+         else  do
+            case findBM coupon map of
+              Just (k,ref) -> do
+                modifyTVar ref (appendBuffer icode)
+              Nothing -> do
+                ref <- newTVar icode
+                writeTVar wCallBufferMap (rendered,insertBM coupon ref map)
+            return Nothing
     traverse (bufferRunEval' w) action
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
-bufferRunEval w icode = bufferRunEval' w (icode:)
+bufferRunEval w icode = bufferRunEval' w (snockBuffer icode)
 bufferRunEval' :: Window -> CallBuffer -> STM ()
 bufferRunEval' w@Window{..} icode = do
       mode <- readTVar wCallBufferMode
       let buffer = do
-              modifyTVar wCallBuffer (.icode)
+              modifyTVar wCallBuffer (appendBuffer icode)
               return Nothing
       o <- case mode of
             BufferAll ->  buffer
