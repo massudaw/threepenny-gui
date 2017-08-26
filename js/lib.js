@@ -30,26 +30,34 @@ Haskell.bind = function (el, eventType, fun,code,async_fun) {
       fun(x.toString());
     });
   } else if (eventType.match('dragstart|dragenter|dragover|dragleave|drag|drop|dragend')) {
-    $(el).bind(eventType, function(e) {
-      fun( e.originalEvent.dataTransfer
+    var bf = function(e) {
+      fun(e.originalEvent.dataTransfer
             ? [e.originalEvent.dataTransfer.getData("dragData")]
             : [] );
-    });
-	} else if (handlers != null && handlers[eventType] != null ) {
-    handlers[eventType](el,eventType,fun);
+    }
+    $(el).bind(eventType, bf);
+    return bf;
+  } else if (handlers != null && handlers[eventType] != null ) {
+    return handlers.bind[eventType](el,eventType,fun);
   } else {
-    $(el).bind(eventType, function(event) {
+    var bf = function(event) {
       var res = eval(code);
-        if (! async_fun) 
+        if (! async_fun)
           fun(res);
       return true;
-    });
+    }
+    $(el).bind(eventType, bf);
+    return bf;
   }
 };
 
 // Unbinding from events
-Haskell.unbind = function (el,eventType){
-  $(el).unbind(eventType);
+Haskell.unbind = function (el,eventType,ptr){
+  if (handlers != null && handlers[eventType] != null ) {
+    return handlers.unbind[eventType](el,eventType,fun);
+  }
+
+  $(el).unbind(eventType,ptr);
 };
 
 /////////////////////////////////////////////////////////////////////

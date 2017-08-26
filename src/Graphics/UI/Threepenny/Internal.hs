@@ -1,4 +1,4 @@
-{-# LANGUAGE ExistentialQuantification,DeriveDataTypeable #-}
+{-# LANGUAGE ScopedTypeVariables,ExistentialQuantification,DeriveDataTypeable #-}
 module Graphics.UI.Threepenny.Internal (
     -- * Synopsis
     -- | Internal core:
@@ -48,6 +48,7 @@ import Foreign.JavaScript hiding
     (runFunction,runFunctionDelayed, callFunction, setCallBufferMode, flushCallBuffer
     ,debug, timestamp, Window)
 
+import Debug.Trace
 data Wrap f = forall a . Wrap (f a)
 {-----------------------------------------------------------------------------
     Custom Window type
@@ -177,10 +178,10 @@ addEventIO name fun@(JSFunction _ m ) async el Window{ jsWindow = w, wAllEvents 
             liftIO $ Foreign.addReachable el handlerPtr
             E.registerDynamic (Foreign.destroy handlerPtr)
             v <- liftIO $ code fun
-            liftIO . JS.runFunction w $
+            bptr <- liftIO . JS.unsafeCreateJSObject w $
               ffi "Haskell.bind(%1,%2,%3,%4,%5)" el name handlerPtr (unJSCode v)  async
             E.registerDynamic $ JS.runFunction w $
-              ffi "Haskell.unbind(%1,%2)" el name
+              ffi "Haskell.unbind(%1,%2,%3)" el name bptr
 
 
     (e,h) <- E.newEvent
@@ -200,8 +201,11 @@ addEvents el Window{ jsWindow = w, wEvents = wEvents } = do
             handlerPtr <- JS.exportHandler w handler
             -- make handler reachable from element
             Foreign.addReachable el handlerPtr
-            JS.runFunction w $
+            bptr <- JS.unsafeCreateJSObject w $ traceShow(name) $
                 ffi "Haskell.bind(%1,%2,%3)" el name handlerPtr
+            addFinalizer handlerPtr $ void $ JS.runFunction w $
+              ffi "Haskell.unbind(%1,%2,%3)" el name bptr
+
 
     events <- E.newEventsNamed initializeEvent
 

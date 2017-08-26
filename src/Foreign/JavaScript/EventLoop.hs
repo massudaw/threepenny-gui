@@ -19,10 +19,12 @@ import qualified Data.Text                as T
 import Data.List (intercalate)
 import qualified System.Mem
 
+import Data.Time
 import Control.Concurrent
 import Foreign.RemotePtr        as Foreign
 import Foreign.JavaScript.Types
 import Debug.Trace
+import GHC.Conc
 
 rebug :: IO ()
 #ifdef REBUG
@@ -105,9 +107,9 @@ eventLoop init comm = do
 
                     Quit      -> return Nothing -- tryTakeTMVar disconnect
 
-    let flushTimeout = forever ( do
-            threadDelay (300*1000)
-            atomically $ ifOpen comm  $ flushCallBufferSTM w )
+    let flushTimeout = iterateM flush_limit (\i ->  do
+            threadDelay (i*1000)
+            atomically $ flushDirtyBuffer comm w)
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             (ref,msg) <- atomically $ do
@@ -189,10 +191,35 @@ fromJSStablePtr js w@(Window{..}) = do
             return ptr
 
 
+iterateM ix fun = do
+  v <- fun ix
+  iterateM v fun
+
+
+flushDirtyBuffer :: Comm -> Window -> STM Int
+flushDirtyBuffer comm w@Window{..} = do
+    do
+      (ti,tl,ix) <- takeTMVar wCallBufferStats
+      tc <- unsafeIOToSTM getCurrentTime
+      let delta = diffUTCTime  tc tl
+          total = diffUTCTime tl  ti
+      if delta > fromIntegral flush_limit/1000 || ix > 10000 || total > 0.1
+        then do
+            ifOpen comm $ flushCallBufferSTM w
+            return flush_limit
+        else do
+        putTMVar wCallBufferStats (ti,tl,ix)
+        return (flush_limit - round(delta*1000))
+
+flush_limit :: Int
+flush_limit = 16
+
+
 flushCallBufferSTM :: Window -> STM ()
 flushCallBufferSTM w@Window{..} = do
         code <- readTVar wCallBuffer
         writeTVar wCallBuffer id
+        -- writeTMVar wCallBufferStats Nothing
         runEval  code
         return ()
 

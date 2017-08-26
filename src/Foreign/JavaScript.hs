@@ -64,7 +64,8 @@ serve config init = httpComm config $ eventLoop $ \w -> do
 -- and may not be run immediately. See 'setCallBufferMode'.
 runFunction :: Window -> JSFunction () -> IO ()
 runFunction w f = do
-  atomically. bufferRunEval w  =<< toCode f
+  t0 <- getCurrentTime
+  atomically. bufferRunEval w  t0=<< toCode f
 
 {-----------------------------------------------------------------------------
     JavaScript
@@ -88,7 +89,8 @@ runFunctionDelayed w js f = do
 unsafeCreateJSObject :: Window -> JSFunction NewJSObject -> IO JSObject
 unsafeCreateJSObject w f = do
     g <- wrapImposeStablePtr w f
-    atomically . bufferRunEval w =<< toCode g
+    t0 <- getCurrentTime
+    atomically . bufferRunEval w t0=<< toCode g
     o <- marshalResult g w JSON.Null
     cid  <- unprotectedGetCoupon o
     addFinalizer o (atomically $ modifyTVar (wCallBufferMap  w) (\(k,v) -> (Set.delete cid k ,v)))
@@ -174,6 +176,7 @@ bufferCallEval' w@Window{..} ref icode =  do
 forceObject :: Window -> JSObject -> IO ()
 forceObject  w@Window{..} top = do
   root <- unprotectedGetCoupon top
+  t0 <- getCurrentTime
   void $ atomically $ do
     action <- do
          (rendered,map) <- readTVar wCallBufferMap
@@ -188,12 +191,13 @@ forceObject  w@Window{..} top = do
                 Nothing ->   do
                   writeTVar wCallBufferMap (Set.insert root rendered,map)
                   return Nothing
-    traverse (bufferRunEval' w) action
+    traverse (bufferRunEval' w t0) action
 
 flushChildren :: Window -> JSObject -> JSObject -> IO ()
 flushChildren w@Window{..} top child = do
   root <- unprotectedGetCoupon top
   childs <- unprotectedGetCoupon child
+  t0 <- getCurrentTime
   void $ atomically $ do
     mode <- readTVar wCallBufferMode
     let childFun c = do
@@ -238,7 +242,7 @@ flushChildren w@Window{..} top child = do
                      var <- newTVar id
                      writeTVar wCallBufferMap (rendered , insertSBM (Set.fromList [root,childs]) var map)
                      return Nothing
-    traverse (bufferRunEval' w ) action
+    traverse (bufferRunEval' w t0) action
 
 appendBuffer xs ys = ys . xs
 snockBuffer e =  (e:)
@@ -251,6 +255,7 @@ bufferRunEvalMethod w j s = bufferRunEvalMethod' w j (snockBuffer s)
 bufferRunEvalMethod' :: Window -> JSObject -> CallBuffer -> IO ()
 bufferRunEvalMethod'  w@Window{..} js icode = do
   coupon <- unprotectedGetCoupon js
+  t0 <- getCurrentTime
   void $ atomically $ do
     mode <- readTVar wCallBufferMode
     action <- do
@@ -265,16 +270,17 @@ bufferRunEvalMethod'  w@Window{..} js icode = do
                 ref <- newTVar icode
                 writeTVar wCallBufferMap (rendered,insertBM coupon ref map)
             return Nothing
-    traverse (bufferRunEval' w) action
+    traverse (bufferRunEval' w t0 ) action
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
-bufferRunEval w icode = bufferRunEval' w (snockBuffer icode)
-bufferRunEval' :: Window -> CallBuffer -> STM ()
-bufferRunEval' w@Window{..} icode = do
+bufferRunEval w t0 icode = bufferRunEval' w t0 (snockBuffer icode)
+bufferRunEval' :: Window -> UTCTime -> CallBuffer -> STM ()
+bufferRunEval' w@Window{..} t0 icode = do
       mode <- readTVar wCallBufferMode
       let buffer = do
               modifyTVar wCallBuffer (appendBuffer icode)
+              tryModifyTMVar wCallBufferStats (maybe (t0,t0,1) (\(ti,tf,i) -> (ti,t0,i+1)))
               return Nothing
       o <- case mode of
             BufferAll ->  buffer
@@ -282,3 +288,7 @@ bufferRunEval' w@Window{..} icode = do
             i-> return $ Just icode
       traverse runEval o
       return ()
+
+tryModifyTMVar var f =  do
+  v <- tryTakeTMVar var
+  putTMVar var (f v)

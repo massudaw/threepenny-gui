@@ -19,6 +19,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.List as L
 
+import Data.Time
 import Foreign.RemotePtr
 
 {-----------------------------------------------------------------------------
@@ -221,6 +222,7 @@ data Window = Window
     , wCallBuffer     :: TVar CallBuffer
     , wCallBufferMap  :: TVar (Set Coupon , BufferMap Coupon (TVar CallBuffer))
     , wCallBufferMode :: TVar CallBufferMode
+    , wCallBufferStats :: TMVar (UTCTime,UTCTime,Int)
 
     , timestamp      :: IO ()
     -- ^ Print a timestamp and the time difference to the previous one
@@ -236,14 +238,16 @@ data Window = Window
 
 newPartialWindow :: IO Window
 newPartialWindow = do
+    t0 <- getCurrentTime
     ptr <- newRemotePtr (-1) () =<< newVendor
     b1  <- newTVarIO id
     b1i  <- newTVarIO (Set.empty ,[])
     b2  <- newTVarIO BufferRun
+    b3  <- newEmptyTMVarIO
     let
       nop :: Monad m => b -> m ()
       nop = const $ return ()
-    Window nop undefined b1 b1i b2 (return ()) nop nop ptr <$> newVendor <*> newVendor
+    Window nop undefined b1 b1i b2 b3  (return ()) nop nop ptr <$> newVendor <*> newVendor
 
 -- | For the purpose of controlling garbage collection,
 -- every 'Window' as an associated 'RemotePtr' that is alive
