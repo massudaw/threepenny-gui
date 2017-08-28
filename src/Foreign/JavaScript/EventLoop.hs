@@ -57,7 +57,6 @@ eventLoop init server comm = void $ do
     -- The thread `multiplexer` reads from the client and
     --   sorts the messages into the appropriate queue.
     events      <- newTQueueIO
-    lastwrite <- newTVarIO Nothing
     results     <- newTQueueIO :: IO (TQueue Result)
     -- The thread `handleCalls` executes FFI calls
     --    from the Haskell side in order.
@@ -125,21 +124,7 @@ eventLoop init server comm = void $ do
                         result <- readTQueue results
                         putTMVar ref result
                     Nothing  -> return ()
-<<<<<<< HEAD
-||||||| parent of 742e75f... mend
-    let flushTimeout = forever (do
-            v <- flushDirtyBuffer comm w
-            case v of
-              Left i -> threadDelay (i *1000)
-              Right (i,code') -> do
-                runEval w $ code' []
-                threadDelay (i *1000)
-                )
 
-
-=======
-
->>>>>>> 742e75f... mend
     -- Receive events from client and handle them in order.
     let handleEvents = do
             me <- atomically $ do

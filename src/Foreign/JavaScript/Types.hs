@@ -73,7 +73,6 @@ data Config = Config
         -- @Nothing@ means that the port number is
         -- read from the environment variable @PORT@.
         -- Alternatively, port @8023@ is used if this variable is not set.
->>>>>>> a2dff44... force flush of buffer
     , jsAddr       :: Maybe ByteString
     , jsCustomHTML :: Maybe FilePath
     , jsStatic     :: Maybe FilePath

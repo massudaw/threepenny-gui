@@ -30,7 +30,7 @@ module Foreign.JavaScript (
     ) where
 
 import           Control.Concurrent.STM       as STM
-import           Control.Monad                           (unless,when)
+import           Control.Monad                           (unless)
 import qualified Data.Aeson                   as JSON
 import           Foreign.JavaScript.CallBuffer
 import           Foreign.JavaScript.EventLoop
@@ -38,8 +38,6 @@ import           Foreign.JavaScript.Marshal
 import           Foreign.JavaScript.Server
 import           Foreign.JavaScript.Types
 import           Foreign.RemotePtr            as Foreign
-import           Data.Time
-import           Data.Maybe(isJust)
 
 {-----------------------------------------------------------------------------
     Server
@@ -66,8 +64,7 @@ serve config init = httpComm config $ eventLoop $ \w -> do
 -- it can be buffered and sent to the browser window at a later time.
 -- See 'setCallBufferMode' and 'flushCallBuffer' for more.
 runFunction :: Window -> JSFunction () -> IO ()
-runFunction w f = do
-  bufferRunEval w =<< toCode f
+runFunction w f = bufferRunEval w =<< toCode f
 
 -- | Run a JavaScript function that creates a new object.
 -- Return a corresponding 'JSObject' without waiting for the browser
