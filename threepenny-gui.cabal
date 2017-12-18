@@ -90,6 +90,7 @@ Library
                     ,Reactive.Threepenny
   other-modules:
                      Foreign.JavaScript.EventLoop
+                    ,Foreign.JavaScript.CallBuffer
                     ,Foreign.JavaScript.Include
                     ,Foreign.JavaScript.Resources
                     ,Foreign.JavaScript.Server

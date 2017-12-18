@@ -35,10 +35,10 @@ data Color  = RGB  { red :: Int, green :: Int, blue :: Int }
 
 type ColorStop = (Double,  Color)
 
-data Gradient  
-    -- | defines a linear gradient 
-    -- see <http://www.w3schools.com/tags/canvas_createlineargradient.asp> 
-    = LinearGradient 
+data Gradient
+    -- | defines a linear gradient
+    -- see <http://www.w3schools.com/tags/canvas_createlineargradient.asp>
+    = LinearGradient
       { upperLeft  :: Vector -- ^ the left-upper point where the gradient should begin
       , gradWidth  :: Double -- ^ the width of the gradient
       , gradHeight :: Double -- ^ the height of the gradient
@@ -49,7 +49,7 @@ data FillStyle
     = SolidColor Color
     | HtmlColor String    -- Html representation of a color
     | Gradient Gradient
-    deriving (Show, Eq) 
+    deriving (Show, Eq)
 
 
 {-----------------------------------------------------------------------------
@@ -132,7 +132,7 @@ assignFillStyle :: FillStyle -> Canvas -> UI ()
 assignFillStyle (Gradient fs) canvas =
     runFunction $ ffi cmd canvas
         where cmd = "var ctx=%1.getContext('2d'); var grd=" ++ fsStr fs ++ cStops fs ++ "ctx.fillStyle=grd;"
-              fsStr (LinearGradient (x0, y0) w h _) 
+              fsStr (LinearGradient (x0, y0) w h _)
                                                 = "ctx.createLinearGradient(" ++ pStr [x0, y0, x0+w, y0+h] ++ ");"
               cStops (LinearGradient _ _ _ sts) = concatMap addStop sts
               addStop (p,c)                     = "grd.addColorStop(" ++ show p ++ ",'" ++ rgbString c ++ "');"
@@ -234,7 +234,7 @@ stroke :: Canvas -> UI ()
 stroke = runFunction . ffi "%1.getContext('2d').stroke()"
 
 -- | Render a text in solid color at a certain point on the canvas.
--- 
+--
 -- The 'fillStyle' attribute determines the color.
 -- The 'textFont' attribute determines the font used.
 -- The 'textAlign' attributes determines the position of the text
@@ -244,7 +244,7 @@ fillText text (x,y) canvas =
   runFunction $ ffi "%1.getContext('2d').fillText(%2, %3, %4)" canvas text x y
 
 -- | Render the outline of a text at a certain point on the canvas.
--- 
+--
 -- The 'strokeStyle' attribute determines the color of the outline.
 -- The 'textFont' attribute determines the font used.
 -- The 'textAlign' attributes determines the position of the text

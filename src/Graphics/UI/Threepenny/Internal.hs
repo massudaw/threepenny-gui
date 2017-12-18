@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables,ExistentialQuantification,DeriveDataTypeable #-}
+{-# LANGUAGE RecursiveDo,ScopedTypeVariables,ExistentialQuantification,DeriveDataTypeable #-}
 module Graphics.UI.Threepenny.Internal (
     -- * Synopsis
     -- | Internal core:
@@ -9,6 +9,7 @@ module Graphics.UI.Threepenny.Internal (
     startGUI,
 
     UI, runUI, liftIOLater, askWindow,ui,
+    head_,body,
 
     FFI, FromJS, ToJS, JSFunction, JSObject, ffi,async,event,
     runFunction, runFunctionDelayed , callFunction,
@@ -57,6 +58,8 @@ data Wrap f = forall a . Wrap (f a)
 data Window = Window
     { wId :: Int
     , wTimeZone :: TimeZone
+    , wBody :: Element
+    , wHead :: Element
     , jsWindow    :: JS.Window  -- JavaScript window
     , eDisconnect :: E.Event () -- event that happens when client disconnects
     , wEvents     :: Foreign.Vendor Events
@@ -71,7 +74,7 @@ data Window = Window
 startGUI
     :: Config               -- ^ Server configuration.
     -> (Window -> UI ())    -- ^ Action to run whenever a client browser connects.
-    ->  (Dynamic Int)
+    ->  Dynamic Int
     -> (Window -> IO ())
     -> IO ()
 startGUI config init preinit finalizer = JS.serve config ( \w -> do
@@ -85,16 +88,23 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
     wChildren <- Foreign.newVendor
     timezone <- jsTimeZone w
     (windowId ,finini) <- E.runDynamic $ preinit
-    let window = Window
-            { wId = windowId
-            , wTimeZone = timezone
-            , jsWindow    = w
-            , eDisconnect = eDisconnect
-            , wEvents     = wEvents
-            , wAllEvents = wAllEvents
-            , wChildren   = wChildren
-            }
-
+    window <- mdo
+      let window = Window
+              { wId = windowId
+              , wTimeZone = timezone
+              , wHead = h
+              , wBody = b
+              , jsWindow    = w
+              , eDisconnect = eDisconnect
+              , wEvents     = wEvents
+              , wAllEvents = wAllEvents
+              , wChildren   = wChildren
+              }
+      jsh <- JS.unsafeCreateJSObject  w $ ffi "document.head"
+      jsb <- JS.unsafeCreateJSObject  w $ ffi "document.body"
+      h <- fromJSObject0  jsh window
+      b <- fromJSObject0  jsb window
+      return window
     JS.onDisconnect w $ finalizer window >> sequence_ finini
     -- run initialization
     fin <- E.execDynamic ( runUI window $ init window)
@@ -109,7 +119,11 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
 disconnect :: Window -> E.Event ()
 disconnect = eDisconnect
 
+head_ :: UI Element
+head_ = wHead <$> askWindow
 
+body :: UI Element
+body = wBody <$> askWindow
 
 {-----------------------------------------------------------------------------
     Elements
@@ -151,10 +165,10 @@ getChildren el window@Window{ wChildren = wChildren } =
 
 -- | Convert JavaScript object into an Element by attaching relevant information.
 -- The JavaScript object may still be subject to garbage collection.
-fromJSObject0 :: JS.JSObject -> Window -> Dynamic Element
+fromJSObject0 :: JS.JSObject -> Window -> IO Element
 fromJSObject0 el window = do
     events   <- getEvents   el window
-    children <- liftIO$ getChildren el window
+    children <- getChildren el window
     return $ Element el events children  window
 
 -- | Convert JavaScript object into an element.
@@ -164,8 +178,8 @@ fromJSObject0 el window = do
 fromJSObject :: JS.JSObject -> UI Element
 fromJSObject el = do
     window <- askWindow
-    ui $ do
-        liftIO$ Foreign.addReachable (JS.root $ jsWindow window) el
+    liftIO $ do
+        Foreign.addReachable (JS.root $ jsWindow window) el
         fromJSObject0 el window
 
 addEventIO :: String -> JSFunction a -> Bool -> JS.JSObject -> Window -> Dynamic (E.Event a)
@@ -201,10 +215,9 @@ addEvents el Window{ jsWindow = w, wEvents = wEvents } = do
             handlerPtr <- JS.exportHandler w handler
             -- make handler reachable from element
             Foreign.addReachable el handlerPtr
-            bptr <- JS.unsafeCreateJSObject w $ traceShow(name) $
+            bptr <- JS.unsafeCreateJSObject w $
                 ffi "Haskell.bind(%1,%2,%3)" el name handlerPtr
-            addFinalizer handlerPtr $ void $ JS.runFunction w $
-              ffi "Haskell.unbind(%1,%2,%3)" el name bptr
+            return ()
 
 
     events <- E.newEventsNamed initializeEvent
@@ -217,9 +230,9 @@ addEvents el Window{ jsWindow = w, wEvents = wEvents } = do
     return events
 
 -- | Lookup or create lazy events for a JavaScript object.
-getEvents :: JS.JSObject -> Window -> E.Dynamic Events
-getEvents el window@Window{ wEvents = wEvents } = do
-    liftIO$ Foreign.withRemotePtr el $ \coupon _ -> do
+getEvents :: JS.JSObject -> Window -> IO  Events
+getEvents el window@Window{ wEvents = wEvents } =
+    Foreign.withRemotePtr el $ \coupon _ -> do
         mptr <- Foreign.lookup coupon wEvents
         case mptr of
             Nothing -> addEvents el window
@@ -302,8 +315,8 @@ mkElementNamespace :: Maybe String -> String -> UI Element
 mkElementNamespace namespace tag = do
     window <- askWindow
     let w = jsWindow window
-    ui $ do
-        el <- liftIO$ JS.unsafeCreateJSObject w $ case namespace of
+    liftIO$   do
+        el <- JS.unsafeCreateJSObject w $ case namespace of
             Nothing -> ffi "document.createElement(%1)" tag
             Just ns -> ffi "document.createElementNS(%1,%2)" ns tag
         fromJSObject0 el window

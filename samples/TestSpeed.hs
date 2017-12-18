@@ -15,7 +15,6 @@ main = startGUI defaultConfig setup (return 1 ) (const (return ()))
 setup :: Window -> UI ()
 setup window = void $ do
     return window # set title "Test Speed"
-
     let msg = "This program tries to measure the speed at which HTML elements can be built."
     getBody #+ [UI.string msg, UI.br]
     UI.timestamp
@@ -23,3 +22,14 @@ setup window = void $ do
     UI.timestamp
     getBody #+ [UI.string $ concat $ replicate 200 "Haskell-"]
     UI.timestamp
+    getBody #+ [UI.string $ concat $ replicate 200 "Haskell-"]
+    UI.timestamp
+    getBody #+ [UI.string $ concat $ replicate 200 "Haskell-"]
+    UI.timestamp
+    getBody #+ [UI.string $ concat $ replicate 200 "Haskell-"]
+    UI.timestamp
+    getBody #+ [UI.string $ concat $ replicate 200 "Haskell-"]
+    UI.timestamp
+    getBody #+ [UI.string $ concat $ replicate 200 "Haskell-"]
+    liftIOLater $ runUI window UI.timestamp
+

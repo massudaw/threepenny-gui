@@ -38,7 +38,7 @@ Haskell.bind = function (el, eventType, fun,code,async_fun) {
     $(el).bind(eventType, bf);
     return bf;
   } else if (handlers != null && handlers[eventType] != null ) {
-    return handlers.bind[eventType](el,eventType,fun);
+    return handlers[eventType](el,eventType,fun);
   } else {
     var bf = function(event) {
       var res = eval(code);
@@ -53,9 +53,6 @@ Haskell.bind = function (el, eventType, fun,code,async_fun) {
 
 // Unbinding from events
 Haskell.unbind = function (el,eventType,ptr){
-  if (handlers != null && handlers[eventType] != null ) {
-    return handlers.unbind[eventType](el,eventType,fun);
-  }
 
   $(el).unbind(eventType,ptr);
 };

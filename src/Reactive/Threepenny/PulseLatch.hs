@@ -91,11 +91,12 @@ newPulse = do
         fireP a = do
             let pulses = Vault.insert key (Just a) $ Vault.empty
             (handlersLatch,handlersIO) <- readIORef handlersRef
-            (ms, _)  <- runEvalP pulses $ do
+            ((msi,msj), _)  <- runEvalP pulses $ do
                 i <- sequence handlersLatch
                 j <- sequence handlersIO
-                return (F.toList i ++ F.toList j)
-            sequence_ ms
+                return ( i ,j)
+            sequence_ msi
+            sequence_ msj
 
         evalP = join . Vault.lookup key <$> Monad.get
 
@@ -109,8 +110,7 @@ newPulse = do
 addHandler :: Pulse a -> (a -> IO ()) -> Build (IO ())
 addHandler p f = do
     uid <- newUnique
-    r <- addHandlerP p ((uid, DoIO), whenPulse p f)
-    return r
+    addHandlerP p ((uid, DoIO), whenPulse p f)
 
 
 

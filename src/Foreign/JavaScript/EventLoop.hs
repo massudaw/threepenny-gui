@@ -22,6 +22,7 @@ import qualified System.Mem
 import Data.Time
 import Control.Concurrent
 import Foreign.RemotePtr        as Foreign
+import Foreign.JavaScript.CallBuffer
 import Foreign.JavaScript.Types
 import Debug.Trace
 import GHC.Conc
@@ -44,9 +45,8 @@ handleEvent w@(Window{..}) (name, args) = do
         Just f  -> withRemotePtr f (\_ f -> f args)
 
 
-type Result = Either String JSON.Value
 
-appendBuffer = intercalate ";" . ($[])
+joinBuffer = intercalate ";" . ($[])
 
 -- | Event loop for a browser window.
 -- Supports concurrent invocations of `runEval` and `callEval`.
@@ -80,8 +80,8 @@ eventLoop init comm = do
     let onDisconnect m = atomically $ takeTMVar disconnect >>= putTMVar disconnect . (>>m)
 
     w0 <- newPartialWindow
-    let w = w0 { runEval        = maybe (return ()) (run  . RunEval) . nonEmpty . appendBuffer
-               , callEval       = (\ref -> call ref . CallEval. appendBuffer)
+    let w = w0 { runEval        = maybe (return ()) (run  . RunEval) . nonEmpty . joinBuffer
+               , callEval       = (\ref -> call ref . CallEval. joinBuffer)
                , debug        = debug
                , timestamp    = atomically $ run Timestamp
                , onDisconnect = onDisconnect
@@ -107,9 +107,9 @@ eventLoop init comm = do
 
                     Quit      -> return Nothing -- tryTakeTMVar disconnect
 
-    let flushTimeout = iterateM flush_limit (\i ->  do
+    let flushTimeout = forever $ do
+            i <- atomically $ flushDirtyBuffer comm w
             threadDelay (i*1000)
-            atomically $ flushDirtyBuffer comm w)
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             (ref,msg) <- atomically $ do
@@ -168,14 +168,14 @@ untilJustM m = m >>= \x -> case x of
 newHandler :: Window -> ([JSON.Value] -> IO ()) -> IO HsEvent
 newHandler w@(Window{..}) handler = do
     coupon <- newCoupon wEventHandlers
-    newRemotePtr coupon (handler . parseArgs) wEventHandlers
+    ptr <- newRemotePtr coupon (handler . parseArgs) wEventHandlers
+    return ptr
     where
     fromSuccess (JSON.Success x) = x
     -- parse a genuine JavaScript array
     parseArgs x = fromSuccess (JSON.fromJSON x) :: [JSON.Value]
     -- parse a JavaScript arguments object
     -- parseArgs x = Map.elems (fromSuccess (JSON.fromJSON x) :: Map.Map String JSON.Value)
-
 
 -- | Convert a stable pointer from JavaScript into a 'JSObject'.
 fromJSStablePtr :: JSON.Value -> Window -> IO JSObject
@@ -187,13 +187,8 @@ fromJSStablePtr js w@(Window{..}) = do
         Nothing -> do
             ptr <- newRemotePtr coupon (JSPtr coupon) wJSObjects
             addFinalizer ptr $
-              atomically $ runEval (("Haskell.freeStablePtr('" ++ show coupon ++ "')"):)
+              bufferRunEvalMethod' w coupon (snockBuffer $"Haskell.freeStablePtr('" ++ show coupon ++ "')")
             return ptr
-
-
-iterateM ix fun = do
-  v <- fun ix
-  iterateM v fun
 
 
 flushDirtyBuffer :: Comm -> Window -> STM Int
@@ -201,27 +196,24 @@ flushDirtyBuffer comm w@Window{..} = do
     do
       (ti,tl,ix) <- takeTMVar wCallBufferStats
       tc <- unsafeIOToSTM getCurrentTime
-      let delta = diffUTCTime  tc tl
-          total = diffUTCTime tl  ti
-      if delta > fromIntegral flush_limit/1000 || ix > 10000 || total > 0.1
+      let delta = round $ diffUTCTime tc tl *1000
+          total = round $ diffUTCTime tl ti *1000
+      if delta > flush_limit_min || total > flush_limit_max
         then do
-            ifOpen comm $ flushCallBufferSTM w
-            return flush_limit
+          flushCallBufferSTM w
+          return flush_limit_min
         else do
-        putTMVar wCallBufferStats (ti,tl,ix)
-        return (flush_limit - round(delta*1000))
-
-flush_limit :: Int
-flush_limit = 16
+          putTMVar wCallBufferStats (ti,tl,ix)
+          return (flush_limit_min - delta)
 
 
-flushCallBufferSTM :: Window -> STM ()
-flushCallBufferSTM w@Window{..} = do
-        code <- readTVar wCallBuffer
-        writeTVar wCallBuffer id
-        -- writeTMVar wCallBufferStats Nothing
-        runEval  code
-        return ()
+flush_limit_min :: Int
+flush_limit_min = 16
+
+flush_limit_max :: Int
+flush_limit_max = 100
+
+
 
 ifOpen comm stm = do
             r <- do

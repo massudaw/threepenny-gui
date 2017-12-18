@@ -101,6 +101,8 @@ simple f =
   FromJS' { wrapCode = f  , marshal = \_ -> fromSuccessIO . JSON.fromJSON }
     where
     fromSuccessIO (JSON.Success a) = return a
+    fromSuccessIO (JSON.Error i) = error i
+
 
 instance FromJS String     where fromJS = simple $ apply1 "%1.toString()"
 instance FromJS T.Text     where fromJS = simple $ apply1 "%1.toString()"

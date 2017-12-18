@@ -7,20 +7,20 @@ import Graphics.UI.Threepenny.Core
     Main
 ------------------------------------------------------------------------------}
 main :: IO ()
-main = startGUI defaultConfig setup
+main = startGUI defaultConfig setup (return 1 ) (const (return ()))
 
 setup :: Window -> UI ()
 setup w = do
     return w # set title "Mouse"
-    
+
     out  <- UI.span # set text "Coordinates: "
     wrap <- UI.div #. "wrap"
         # set style [("width","300px"),("height","300px"),("border","solid black 1px")]
         # set (attr "tabindex") "1" -- allow key presses
         #+ [element out]
-    getBody w #+ [element wrap]
-    
-    on UI.mousemove wrap $ \xy ->
+    getBody  #+ [element wrap]
+
+    UI.mousemove >>= on wrap $ \xy ->
         element out # set text ("Coordinates: " ++ show xy)
-    on UI.keydown   wrap $ \c ->
+    UI.keydown >>= on    wrap $ \c ->
         element out # set text ("Keycode: " ++ show c)

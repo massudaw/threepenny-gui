@@ -48,7 +48,7 @@ Haskell.createWebSocket = function (url0, receive) {
       var myfile = new FileReader()
       myfile.addEventListener('loadend',function(e){
       // Haskell.log("WebSocket message: %o",msg);
-      var data = decompress(e.srcElement.result); 
+      var data = decompress(e.target.result); 
       wsInDecompressed = data.length + wsInDecompressed ;
       document.getElementById("wsLogger").innerHTML = Math.floor(wsIn/1024) + '/' + Math.floor(wsInDecompressed/1024) + 'KB';
       if (data !== "pong") {
@@ -72,7 +72,7 @@ Haskell.createWebSocket = function (url0, receive) {
     ws.send(compress(JSON.stringify(json)));
   };
   // Close the connection
-  that.close = function () { ws.send(compress("-1")); };
+  that.close = function () { ws.send(compress("quit")); };
   
   return that;
 };

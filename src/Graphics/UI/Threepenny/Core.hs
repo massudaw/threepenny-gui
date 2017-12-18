@@ -158,29 +158,27 @@ string s = mkElement "span" # set text s
 -- | Get the head of the page.
 getHead :: UI Element
 getHead  = do
-  el <- (fromJSObject =<< callFunction (ffi "document.head"))
+  el <- Core.head_
   forceElement el
   return el
 
-addHead :: [UI Element] -> UI ()
-addHead  mys = do
-  ys <- sequence mys
-  mapM (\i -> runFunction (ffi "document.head.append(%1)" i)) ys
-  mapM forceElement ys
+addHead :: [Element] -> UI ()
+addHead  ys = do
+  x <- getBody
+  mapM_ (Core.appendChild x) ys
   return ()
 
 -- | Get the body of the page.
 getBody :: UI Element
 getBody = do
-  el <- (fromJSObject =<< callFunction (ffi "document.body"))
+  el <- Core.body
   forceElement el
   return el
 
-addBody :: [UI Element] -> UI ()
-addBody  mys = do
-  ys <- sequence mys
-  mapM (\i -> runFunction (ffi "document.body.append(%1)" i)) ys
-  mapM forceElement ys
+addBody :: [Element] -> UI ()
+addBody  ys = do
+  x <- getBody
+  mapM_ (Core.appendChild x) ys
   return ()
 
 -- | Get all elements of the given tag name.

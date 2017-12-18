@@ -40,7 +40,7 @@ checkedChange :: Element -> UI (Event Bool)
 checkedChange el =  domEventH "change" el (ffi "this.checked")
 
 mousewheel :: Element -> UI (Event Int)
-mousewheel el =  fmap (`div` 120) <$> domEventH  "wheel" el  (ffi "%1.preventDefault();%1.originalEvent.wheelDelta" event)
+mousewheel el =   domEventH  "wheel" el  (ffi "%1.preventDefault();if (%1.originalEvent.wheelDelta) {%1.originalEvent.wheelDelta/120} else { %1.originalEvent.deltaY/-3}" event)
 
 {-----------------------------------------------------------------------------
     DOM Events

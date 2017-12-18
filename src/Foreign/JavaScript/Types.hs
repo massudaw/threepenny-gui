@@ -102,6 +102,8 @@ instance FromJSON ClientMsg where
             "Result"    -> Result    <$> (msg .: "contents")
             "Exception" -> Exception <$> (msg .: "contents")
             "Quit"      -> return Quit
+            i -> error $ "Unknown message " ++ show i
+    parseJSON i  = error (show i)
 
 readClient :: Comm -> STM ClientMsg
 readClient c = do
@@ -262,6 +264,8 @@ nonEmpty l = Just l
     Marshalling
 ------------------------------------------------------------------------------}
 newtype JSPtr = JSPtr { unsJSPtr :: Coupon }
+
+type Result = Either String JSON.Value
 
 -- | A mutable JavaScript object.
 type JSObject = RemotePtr JSPtr
