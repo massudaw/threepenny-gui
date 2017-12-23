@@ -27,6 +27,7 @@ import           Safe                             (atMay)
 import Foreign.JavaScript.EventLoop (fromJSStablePtr)
 import Foreign.JavaScript.Types
 import Foreign.RemotePtr
+import Foreign.JavaScript.CallBuffer
 
 {-----------------------------------------------------------------------------
     Convert Haskell values to JavaScript values
@@ -150,7 +151,7 @@ wrapImposeStablePtr w@(Window{..}) f = do
     rcode   <- code f
     return $ JSFunction
         { code = return $ apply "Haskell.imposeStablePtr(%1,%2)" [rcode, rcoupon]
-        , marshalResult = \w _ -> newRemotePtr coupon (JSPtr coupon) wJSObjects
+        , marshalResult = \w _ -> newJSPtr w coupon (JSPtr coupon) wJSObjects
         }
 
 {-----------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import qualified Data.Aeson               as JSON
 import           Data.IORef
 import qualified Data.Text                as T
 import Data.List (intercalate)
+import qualified Data.Set as Set
 import qualified System.Mem
 
 import Data.Time
@@ -104,8 +105,7 @@ eventLoop init comm = do
                     Exception e -> do
                       writeTQueue results (Left  e)
                       return Nothing
-
-                    Quit      -> return Nothing -- tryTakeTMVar disconnect
+                    Quit -> fail "Foreign.JavaScript: Browser <-> Server Client Quit."
 
     let flushTimeout = forever $ do
             i <- atomically $ flushDirtyBuffer comm w
@@ -143,7 +143,8 @@ eventLoop init comm = do
                 putStrLn "Foreign.JavaScript: Browser window disconnected."
                 m <- atomically $ tryTakeTMVar disconnect
                 maybe (putStrLn "No disconnect event ") id m
-                commClose comm
+                b <- atomically $ readTVar (commOpen comm)
+                when b (commClose comm)
                   )
 
     return ()
@@ -168,8 +169,7 @@ untilJustM m = m >>= \x -> case x of
 newHandler :: Window -> ([JSON.Value] -> IO ()) -> IO HsEvent
 newHandler w@(Window{..}) handler = do
     coupon <- newCoupon wEventHandlers
-    ptr <- newRemotePtr coupon (handler . parseArgs) wEventHandlers
-    return ptr
+    newJSPtr w coupon (handler . parseArgs) wEventHandlers
     where
     fromSuccess (JSON.Success x) = x
     -- parse a genuine JavaScript array
@@ -185,10 +185,7 @@ fromJSStablePtr js w@(Window{..}) = do
     case mhs of
         Just hs -> return hs
         Nothing -> do
-            ptr <- newRemotePtr coupon (JSPtr coupon) wJSObjects
-            addFinalizer ptr $
-              bufferRunEvalMethod' w coupon (snockBuffer $"Haskell.freeStablePtr('" ++ show coupon ++ "')")
-            return ptr
+          newJSPtr w coupon (JSPtr coupon) wJSObjects
 
 
 flushDirtyBuffer :: Comm -> Window -> STM Int

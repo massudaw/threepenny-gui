@@ -141,11 +141,10 @@ snockBuffer e =  (e:)
 bufferRunEvalMethod :: Window -> JSObject -> String -> IO ()
 bufferRunEvalMethod w js s = do
   coupon <- unprotectedGetCoupon js
-  bufferRunEvalMethod' w coupon (snockBuffer s)
+  atomically $ bufferRunEvalMethod' w coupon (snockBuffer s)
 
-bufferRunEvalMethod' :: Window -> Coupon -> CallBuffer -> IO ()
-bufferRunEvalMethod'  w@Window{..} coupon  icode = do
-  void $ atomically $ do
+bufferRunEvalMethod' :: Window -> Coupon -> CallBuffer -> STM ()
+bufferRunEvalMethod'  w@Window{..} coupon  icode = void $ do
     mode <- readTVar wCallBufferMode
     action <- do
        (rendered,map )<- readTVar wCallBufferMap
@@ -191,3 +190,11 @@ flushCallBufferSTM w@Window{..} = do
         writeTVar wCallBuffer id
         runEval  code
         return ()
+
+newJSPtr w coupon h1 h2 = do
+  o <- newRemotePtr coupon  h1 h2
+  addFinalizer o . atomically $ do
+    bufferRunEvalMethod' w coupon (snockBuffer $ "Haskell.freeStablePtr('" ++ show coupon++ "')")
+    modifyTVar (wCallBufferMap w) (\(k,v) -> (Set.delete coupon k ,v))
+  return o
+
