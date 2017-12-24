@@ -26,8 +26,9 @@ Haskell.bind = function (el, eventType, fun,code,async_fun) {
       return true;
     });
   } else if(eventType === 'sendvalue') {
-    $(el).sendvalue(function(x){
+    return $(el).sendvalue(function(x){
       fun(x.toString());
+      return true
     });
   } else if (eventType.match('dragstart|dragenter|dragover|dragleave|drag|drop|dragend')) {
     var bf = function(e) {
@@ -75,18 +76,18 @@ CanvasRenderingContext2D.prototype.clear =
 
 // Sendvalue
 $.fn.sendvalue = function(trigger){
-  $(this).each(function(){
-    var self = this;
-    var el = $(self);
-    el.keydown(function(e){
+    var el = $(this);
+    var fun = function(e){
       if(e.which == 13) {
         trigger.call(self,el.val());
         return false;
       }
       else
         return true;
-    });
-  });
+    }
+    el.keydown(fun);
+   return fun
+
 };
 
 // Livechange

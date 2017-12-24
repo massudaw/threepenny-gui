@@ -37,13 +37,13 @@ setup globalMsgs window = do
     (nickRef, nickname) <- mkNickname
     messageArea         <- mkMessageArea msgs nickRef
 
-    getBody #+
-        [ UI.div #. "header"   #+ [string "Threepenny Chat"]
+    o <- sequence [ UI.div #. "header"   #+ [string "Threepenny Chat"]
         , UI.div #. "gradient"
         , viewSource
         , element nickname
-        , element messageArea
+         , element messageArea
         ]
+    addBody o
 
     messageReceiver <- liftIO $ forkIO $ receiveMessages window msgs messageArea
 
@@ -66,8 +66,8 @@ receiveMessages w msgs messageArea = do
 mkMessageArea :: Chan Message -> IORef String -> UI Element
 mkMessageArea msgs nickname = do
     input <- UI.textarea #. "send-textarea"
-
-    on UI.sendValue input $ (. trim) $ \content -> do
+    sv <- UI.sendValue input
+    onEvent sv $ (. trim) $ \content -> do
         element input # set value ""
         when (not (null content)) $ liftIO $ do
             now  <- getCurrentTime
@@ -75,7 +75,8 @@ mkMessageArea msgs nickname = do
             when (not (null nick)) $
                 Chan.writeChan msgs (now,nick,content)
 
-    UI.div #. "message-area" #+ [UI.div #. "send-area" #+ [element input]]
+    o <- UI.div #. "send-area" # set children [input]
+    UI.div #. "message-area" # set children [o]
 
 
 mkNickname :: UI (IORef String, Element)
