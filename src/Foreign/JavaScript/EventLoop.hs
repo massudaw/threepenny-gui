@@ -141,9 +141,7 @@ eventLoop init comm = do
                 m <- atomically $ tryTakeTMVar disconnect
                 maybe (putStrLn "No disconnect event ") id m
                 b <- atomically $ readTVar (commOpen comm)
-                when b (commClose comm)
-                  )
-
+                when b (commClose comm))
     return ()
 
 -- | Execute an IO action, but also print any exceptions that it may throw.
@@ -161,7 +159,7 @@ printException = E.handle $ \e -> do
 newHandler :: Window -> ([JSON.Value] -> IO ()) -> IO HsEvent
 newHandler w@(Window{..}) handler = do
     coupon <- newCoupon wEventHandlers
-    newJSPtr w coupon (handler . parseArgs) wEventHandlers
+    newRemotePtr coupon (handler . parseArgs) wEventHandlers
     where
     fromSuccess (JSON.Success x) = x
     -- parse a genuine JavaScript array
@@ -181,13 +179,13 @@ fromJSStablePtr js w@(Window{..}) = do
 
 flushDirtyBuffer :: Comm -> Window -> STM Int
 flushDirtyBuffer comm w@Window{..} = do
-    do
       (ti,tl,ix) <- takeTMVar wCallBufferStats
       tc <- unsafeIOToSTM getCurrentTime
       let delta = round $ diffUTCTime tc tl *1000
           total = round $ diffUTCTime tl ti *1000
       if delta > flush_limit_min || total > flush_limit_max
         then do
+          unsafeIOToSTM (print (ix,diffUTCTime tc tl ,diffUTCTime tl ti))
           flushCallBufferSTM w
           return flush_limit_min
         else do
@@ -204,6 +202,6 @@ flush_limit_max = 100
 
 ifOpen :: Comm -> STM a -> STM a
 ifOpen comm stm = do
-      b <- readTVar (commOpen comm)
-      if b then stm else error "Foreign.JavaScript: Browser <-> Server communication broken."
+  b <- readTVar (commOpen comm)
+  if b then stm else error "Foreign.JavaScript: Browser <-> Server communication broken."
 

@@ -89,13 +89,13 @@ communicationFromWebSocket dict request = do
             x <- atomically $ STM.readTQueue commOut
             -- see note [ServerMsg strictness]
             let message =  JSON.encode $ x
-            WS.sendBinaryData connection . maybe id compress dict  $ message ) -- `E.catch` (\e -> print ("sendfailed",e :: E.SomeException))
+            WS.sendBinaryData connection . maybe id compress dict $ message )
 
     -- read data from browser
     let readData = forever $  (do
             input <- WS.receiveData connection
             case (maybe id decompress dict ) input of
-                "ping" -> (WS.sendBinaryData connection . (maybe id compress dict). LBS.pack $ "pong") --`E.catch` (\e -> print ("send failed",e :: E.SomeException))
+                "ping" -> (WS.sendBinaryData connection . (maybe id compress dict). LBS.pack $ "pong")
                 "quit" -> E.throw WS.ConnectionClosed
                 input  -> case JSON.decode  input of
                     Just x   -> atomically $ STM.writeTQueue commIn x
@@ -103,7 +103,7 @@ communicationFromWebSocket dict request = do
                         "Foreign.JavaScript: Couldn't parse JSON input"
                         ++ show input)
 
-        isConnectionClosed  e= isJust  $ (E.fromException e :: Maybe WS.ConnectionException)
+        isConnectionClosed  e = isJust (E.fromException e :: Maybe WS.ConnectionException)
 
     let manageConnection = do
          withAsync sendData $ \_ -> do
