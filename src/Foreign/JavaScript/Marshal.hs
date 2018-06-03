@@ -3,7 +3,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Foreign.JavaScript.Marshal (
     ToJS(..), FromJS,
-    FFI, JSCode(..),JSAsync(..),JSFunction(..), toCode, marshalResult, ffi,
+    FFI, JSCode(..),JSFunction(..), toCode, marshalResult, ffi,
     IsHandler, convertArguments, handle,emptyFunction,
 
     NewJSObject, wrapImposeStablePtr,
@@ -93,8 +93,6 @@ data FromJS' a = FromJS'
 class FromJS a where
     fromJS   :: FromJS' a
 
-newtype JSAsync a = JSAsync (JSFunction a)
-newtype JSSync a = JSSync (JSFunction a)
 
 -- | Marshal a simple type to Haskell.
 simple :: FromJSON a => (JSCode -> JSCode) -> FromJS' a
@@ -184,21 +182,6 @@ instance (ToJS a, FFI b) => FFI (a -> b) where
         f (x:xs)
 
 
-instance FromJS a => FFI (JSSync a) where
-  fancy f
-    = JSSync $ JSFunction
-      { code = (apply1 "fun(%1)" . wrapCode js  ) <$> f []
-      , marshalResult = marshal js }
-    where
-      js = fromJS
-
-instance FromJS a => FFI (JSAsync a) where
-  fancy f
-    = JSAsync $ JSFunction
-      { code = (\c -> applyAsync c  (apply1 "function(i){return fun(%1)}" $ (wrapCode js  (JSCode "i")))) <$> f []
-      , marshalResult = marshal js }
-    where
-      js = fromJS
 
 
 instance FromJS b        => FFI (JSFunction b) where
@@ -274,18 +257,6 @@ emptyFunction  = JSFunction (return $ JSCode "") (\ _ _ -> return ())
 -- The types ensure that the % character has no meaning in the generated output.
 --
 -- > apply "%1 and %2" [x,y] = x ++ " and " ++ y
-applyAsync :: JSCode -> JSCode -> JSCode
-applyAsync (JSCode code ) (JSCode ascode ) = maybe (JSCode code) JSCode $ go code "fun" []
-    where
-
-    go (i:cs) (a:ls) ap
-      | i == a =  case go cs ls  (ap ++ [i]) of
-                      Just v -> Just $  v
-                      Nothing -> ((ap  ++ [i])++ ) <$> go cs "fun" []
-      | otherwise = ((ap ++ [i] ) ++  ) <$> go cs "fun" []
-    go cs [] _ =  Just (ascode ++cs)
-    go [] [] _   =  Just ascode
-
 
 
 apply :: String -> [JSCode] -> JSCode

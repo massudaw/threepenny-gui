@@ -15,6 +15,7 @@ module Graphics.UI.Threepenny.Attributes (
     enctype, face, for, frameborder, height, href, hspace, httpequiv,
     id_, ismap, lang, marginheight, marginwidth, maxlength, method, multiple,
     name, nohref, noresize, noshade, nowrap,
+    placeholder,
     rel, rev, rows, rowspan, rules,
     scrolling, selected, shape, size, src,
     target, text_, title__, type_, usemap, valign, version, vlink, vspace, width,
@@ -110,6 +111,7 @@ nohref              = emptyAttr "nohref"
 noresize            = emptyAttr "noresize"
 noshade             = emptyAttr "noshade"
 nowrap              = emptyAttr "nowrap"
+placeholder         =   strAttr "placeholder"
 rel                 =   strAttr "rel"
 rev                 =   strAttr "rev"
 rows                =   strAttr "rows"

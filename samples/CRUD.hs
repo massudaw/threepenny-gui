@@ -1,6 +1,6 @@
 {-----------------------------------------------------------------------------
     threepenny-gui
-    
+
     Example:
     Small database with CRUD operations and filtering.
     To keep things simple, the list box is rebuild every time
@@ -24,7 +24,7 @@ import Graphics.UI.Threepenny.Core hiding (delete)
     Main
 ------------------------------------------------------------------------------}
 main :: IO ()
-main = startGUI defaultConfig setup
+main = startGUI defaultConfig setup (return 1)
 
 setup :: Window -> UI ()
 setup window = void $ mdo
@@ -40,31 +40,31 @@ setup window = void $ mdo
 
     -- GUI layout
     element listBox # set (attr "size") "10" # set style [("width","200px")]
-    
+
     let uiDataItem = grid [[string "First Name:", element firstname]
                           ,[string "Last Name:" , element lastname]]
     let glue = string " "
-    getBody window #+ [grid
+    getBody #+ [grid
         [[row [string "Filter prefix:", element filterEntry], glue]
         ,[element listBox, uiDataItem]
         ,[row [element createBtn, element deleteBtn], glue]
         ]]
 
     -- events and behaviors
-    bFilterString <- stepper "" . rumors $ UI.userText filterEntry
+    bFilterString <- ui $ stepper "" . rumors $ UI.userText filterEntry
     let tFilter = isPrefixOf <$> UI.userText filterEntry
         bFilter = facts  tFilter
         eFilter = rumors tFilter
 
     let eSelection  = rumors $ UI.userSelection listBox
         eDataItemIn = rumors $ tDataItem
-        eCreate     = UI.click createBtn
-        eDelete     = UI.click deleteBtn
+    eCreate     <- UI.click createBtn
+    eDelete     <- UI.click deleteBtn
 
     -- database
     -- bDatabase :: Behavior (Database DataItem)
     let update' mkey x = flip update x <$> mkey
-    bDatabase <- accumB emptydb $ concatenate <$> unions
+    bDatabase <- ui $ accumB emptydb $ concatenate <$> unions
         [ create ("Emil","Example") <$ eCreate
         , filterJust $ update' <$> bSelection <@> eDataItemIn
         , delete <$> filterJust (bSelection <@ eDelete)
@@ -72,22 +72,22 @@ setup window = void $ mdo
 
     -- selection
     -- bSelection :: Behavior (Maybe DatabaseKey)
-    bSelection <- stepper Nothing $ head <$> unions
+    bSelection <- ui $ stepper Nothing $ head <$> unions
         [ eSelection
         , Nothing <$ eDelete
         , Just . nextKey <$> bDatabase <@ eCreate
         , (\b s p -> b >>= \a -> if p (s a) then Just a else Nothing)
             <$> bSelection <*> bShowDataItem <@> eFilter
         ]
-                
+
     let bLookup :: Behavior (DatabaseKey -> Maybe DataItem)
         bLookup = flip lookup <$> bDatabase
-                
+
         bShowDataItem :: Behavior (DatabaseKey -> String)
         bShowDataItem = (maybe "" showDataItem .) <$> bLookup
 
         bDisplayDataItem = (UI.string .) <$> bShowDataItem
-                
+
         bListBoxItems :: Behavior [DatabaseKey]
         bListBoxItems = (\p show -> filter (p. show) . keys)
                     <$> bFilter <*> bShowDataItem <*> bDatabase
@@ -99,7 +99,7 @@ setup window = void $ mdo
     let
         bDisplayItem :: Behavior Bool
         bDisplayItem = maybe False (const True) <$> bSelection
-    
+
     element deleteBtn # sink UI.enabled bDisplayItem
     element firstname # sink UI.enabled bDisplayItem
     element lastname  # sink UI.enabled bDisplayItem
@@ -132,7 +132,7 @@ dataItem
 dataItem bItem = do
     entry1 <- UI.entry $ fst . maybe ("","") id <$> bItem
     entry2 <- UI.entry $ snd . maybe ("","") id <$> bItem
-    
+
     return ( (getElement entry1, getElement entry2)
            , (,) <$> UI.userText entry1 <*> UI.userText entry2
            )

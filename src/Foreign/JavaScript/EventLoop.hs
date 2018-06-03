@@ -52,8 +52,8 @@ joinBuffer = intercalate ";" . ($[])
 
 -- | Event loop for a browser window.
 -- Supports concurrent invocations of `runEval` and `callEval`.
-eventLoop :: (Window -> IO (IO ())) ->  (Comm -> IO ())
-eventLoop init comm = do
+eventLoop :: (Window -> IO ())-> EventLoop
+eventLoop init cookie comm = do
     -- To support concurrent FFI calls, we make three threads.
     -- The thread `multiplexer` reads from the client and
     --   sorts the messages into the appropriate queue.
@@ -83,6 +83,7 @@ eventLoop init comm = do
 
     w0 <- newPartialWindow
     let w = w0 { runEval        = maybe (return ()) (run  . RunEval) . nonEmpty . joinBuffer
+               , requestInfo = cookie
                , callEval       = (\ref -> call ref . CallEval. joinBuffer)
                , debug        = debug
                , timestamp    = atomically $ run Timestamp
@@ -94,7 +95,7 @@ eventLoop init comm = do
     -- Read client messages and send them to the
     -- thread that handles events or the thread that handles FFI calls.
     let multiplexer = void $ forever $ do
-            atomically $ do
+            v <- atomically $ do
               msg <- readClient comm
               case msg of
                   Event x y   -> do
@@ -106,7 +107,13 @@ eventLoop init comm = do
                   Exception e -> do
                     writeTQueue results (Left  e)
                     return Nothing
-                  Quit -> fail "Foreign.JavaScript: Browser <-> Server Client Quit."
+                  Quit -> do
+                    return (Just ())
+            traverse (\_ -> do
+              m <- atomically $ tryTakeTMVar disconnect
+              maybe (putStrLn "No disconnect event ") id m
+              b <- atomically $ readTVar (commOpen comm)
+              when b (commClose comm)) v
 
     let flushTimeout = forever $ do
             i <- atomically $ flushDirtyBuffer comm w
@@ -130,7 +137,7 @@ eventLoop init comm = do
                 e <- atomically $ readTQueue events
                 handleEvent w e
                 rebug
-                )`E.catch` (\e -> print  (e :: SomeException))
+                )
 
     Foreign.withRemotePtr (wRoot w) $ \_ _ -> do    -- keep root alive
         printException $
@@ -148,8 +155,8 @@ eventLoop init comm = do
 -- (The exception is rethrown.)
 printException :: IO a -> IO a
 printException = E.handle $ \e -> do
-    putStrLn $ show (e :: E.SomeException)
-    E.throwIO e
+  putStrLn $ "Threepenny Exception: " ++ show (e :: E.SomeException)
+  E.throwIO e
 
 
 {-----------------------------------------------------------------------------

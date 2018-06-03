@@ -15,7 +15,8 @@
 // An optional string argument can be used to specify the server URL.
 Haskell.initFFI = function () {
   var connection;
-  var url = window.location.href.toString();
+  var url = window.location.protocol + '//' + window.location.host;
+  var pathname = window.location.pathname;
 
   if (arguments[0]) {
     url = arguments[0]; // take server url from argument
@@ -68,7 +69,7 @@ Haskell.initFFI = function () {
   };
 
   // Initialize connection to server.
-  connection = Haskell.createWebSocket(url, receive);
+  connection = Haskell.createWebSocket(url, receive,pathname);
 
   /////////////////////////////////////////////////////////////////////
   // Calling Haskell functions
@@ -114,7 +115,11 @@ Haskell.initFFI = function () {
     }
     return object.stablePtr.toString();
   };
-
+  Haskell.replaceStablePtr= function (pastobj, newobj) {
+    newobj.stablePtr = pastobj.stablePtr;
+    stablePtrs[newobj.stablePtr] = newobj;
+    pastobj.replaceWith(newobj);
+  };
   Haskell.imposeStablePtr = function (object, ptr) {
     object.stablePtr = ptr;
     stablePtrs[object.stablePtr] = object;
@@ -125,7 +130,9 @@ Haskell.initFFI = function () {
   };
 
   Haskell.deRefStablePtr = function (ptr) {
-    return stablePtrs[ptr];
+    var obj = stablePtrs[ptr];
+    obj.stablePtr = ptr;
+    return obj;
   };
 
   Haskell.freeStablePtr = function (ptr) {

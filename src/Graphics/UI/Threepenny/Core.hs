@@ -9,7 +9,7 @@ module Graphics.UI.Threepenny.Core (
 
     -- * UI monad
     -- $ui
-    UI,ui, runUI, askWindow, liftIOLater,
+    UI,ui, runUI, askWindow, liftUILater,liftIOLater,
     module Control.Monad.IO.Class,
     module Control.Monad.Fix,
 
@@ -21,7 +21,7 @@ module Graphics.UI.Threepenny.Core (
     Element, getWindow, mkElement, mkElementNamespace, delete,
         string,
         getHead, getBody,addHead,addBody,
-        (#+), children, text, html, attr,attrJS, style, value,valueFFI,
+        (#+), children,root, text, html, attr,attrJS, style, value,valueFFI,
     getElementsByTagName, getElementById, getElementsByClassName,
 
     -- * Layout
@@ -31,7 +31,7 @@ module Graphics.UI.Threepenny.Core (
 
     -- * Events
     -- | For a list of predefined events, see "Graphics.UI.Threepenny.Events".
-    EventData, domEvent,domEventH,domEventSafe,domEventAsync, unsafeFromJSON, disconnect, on, onEvent, onChanges, unsafeMapUI,mapEventUI ,
+    EventData, domEvent,domEventH,domEventSafe,domEventClient,domEventAsync, unsafeFromJSON, disconnect, on, onEvent, onChanges, mapEventUI, mapTidingsUI, mapTidingsUIInterrupt,
     module Reactive.Threepenny,
 
     -- * Attributes
@@ -48,7 +48,7 @@ module Graphics.UI.Threepenny.Core (
     -- | Direct interface to JavaScript in the browser window.
     debug, timestamp,
     ToJS(..), FromJS(..),JS.JSCode(..),FFI,
-    JSFunction, JS.JSAsync(..),ffi,async,event, runFunction, runFunctionDelayed, callFunction,ffiAttr,ffiAttrRead,ffiAttrWrite,ffiAttrCall,JS.emptyFunction,
+    JSFunction, ffi,event, runFunction, runFunctionDelayed, callFunction,ffiAttr,ffiAttrRead,ffiAttrWrite,ffiAttrCall,JS.emptyFunction,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
     ffiExport,
 
@@ -117,6 +117,10 @@ children = mkWriteAttr set
         Core.clearChildren x
         mapM_ (Core.appendChild x) xs
 
+root :: WriteAttr Element Element
+root = mkWriteAttr (flip Core.replaceWith)
+
+
 -- | Child elements of a given element as a HTML string.
 html :: WriteAttr Element String
 html = mkWriteAttr $ \s el ->
@@ -164,7 +168,7 @@ getHead  = do
 
 addHead :: [Element] -> UI ()
 addHead  ys = do
-  x <- getBody
+  x <- getHead
   mapM_ (Core.appendChild x) ys
   return ()
 
@@ -275,12 +279,18 @@ onChanges b f = do
     window <- askWindow
     ui $ Reactive.onChangeDyn b (void . runUI window . f)
 
-unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w ->  fmap fst $ runDynamic $ runUI w (f a))
 
-mapEventUI el f e =  ui $ fmap fst <$> (mapEventDyn (\a -> liftIO (getWindow el) >>= (\w -> runUI w (f a))) e )
+mapEventUI f e =  do
+  w <- askWindow
+  ui $ mapEventDyn (runUI w . f) e
 
+mapTidingsUI f e =  do
+  w <- askWindow
+  ui $ mapTidingsDyn (runUI w . f) e
 
-
+mapTidingsUIInterrupt f e =  do
+  w <- askWindow
+  ui $ mapTidingsDynInterrupt (runUI w . f) e
 
 {-----------------------------------------------------------------------------
     Attributes
@@ -377,6 +387,11 @@ sinkDiff attr bi mx = do
         Reactive.onEventDyn bdiff  $ \i -> void $ runUI window $ set' attr i x
         return ()
     return x
+
+liftUILater :: UI () ->  UI ()
+liftUILater a = do
+  window <- askWindow
+  liftIOLater $ runUI window  a
 
 sinkE :: Eq i => ReadWriteAttr x i o -> Tidings i -> UI x -> UI x
 sinkE attr bi mx = do

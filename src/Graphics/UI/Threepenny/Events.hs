@@ -40,7 +40,7 @@ checkedChange :: Element -> UI (Event Bool)
 checkedChange el =  domEventH "change" el (ffi "this.checked")
 
 mousewheel :: Element -> UI (Event Int)
-mousewheel el =   domEventH  "wheel" el  (ffi "%1.preventDefault();if (%1.originalEvent.wheelDelta) {%1.originalEvent.wheelDelta/120} else { %1.originalEvent.deltaY/-3}" event)
+mousewheel el =   domEventH  "wheel" el  (ffi "function(){%1.preventDefault();if (%1.originalEvent.wheelDelta) {return %1.originalEvent.wheelDelta/120} else { return %1.originalEvent.deltaY/-3}}()" event)
 
 {-----------------------------------------------------------------------------
     DOM Events
@@ -73,7 +73,7 @@ leave el = domEventH "mouseleave" el (ffi "")
 -- not the whole browser window.
 
 coordinates :: Element -> JSFunction (Int,Int)
-coordinates el = ffi "var offset = $(%2).offset();var x  = %1.pageX - offset.left;var y = %1.pageY - offset.top;[x, y] " event el
+coordinates el = ffi "function(){var offset = $(%2).offset();var x  = %1.pageX - offset.left;var y = %1.pageY - offset.top;return [x, y]}()" event el
 
 mousemove :: Element -> UI (Event (Int,Int))
 mousemove el = domEventH "mousemove" el  (coordinates el)
@@ -102,10 +102,10 @@ type KeyCode = (Int,Bool,Bool,Bool)
 
 -- | Key pressed while element has focus.
 keydownFilter :: (Int,Bool,Bool,Bool) -> Element -> UI (Event KeyCode)
-keydownFilter arg el = domEventAsync "keydown"  el (ffi "if ( (%2.keyCode === %3[0]) && (%2.shiftKey === %3[1] ) && (%2.altKey === %3[2] ) && (%2.ctrlKey === %3[3]) )  { (%1)([%2.keyCode,%2.shiftKey,%2.altKey,%2.ctrlKey])}" async event arg )
+keydownFilter arg el = domEventAsync "keydown"  el (\j -> ffi "if ((%2.keyCode === %3[0]) && (%2.shiftKey === %3[1] ) && (%2.altKey === %3[2] ) && (%2.ctrlKey === %3[3]) )  { (%1)([%2.keyCode,%2.shiftKey,%2.altKey,%2.ctrlKey])}" j event arg )
 
 keydown :: Element -> UI (Event KeyCode)
-keydown el = domEventAsync "keydown"  el (ffi "[%1.keyCode,%1.shiftKey,%1.altKey,%1.ctrlKey]" event)
+keydown el = domEventH "keydown"  el (ffi "[%1.keyCode,%1.shiftKey,%1.altKey,%1.ctrlKey]" event)
 
 -- | Key released while element has focus.
 keyup :: Element -> UI (Event KeyCode)

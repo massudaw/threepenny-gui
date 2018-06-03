@@ -12,9 +12,9 @@
   createWebSocket :: (JSON -> IO ()) -> IO { send :: JSON -> IO () }
   
 ********************************************************************* */
-Haskell.createWebSocket = function (url0, receive) {
+Haskell.createWebSocket = function (url0, receive,pathname) {
   var that = {};
-  var url  =  'ws' + url0.slice(4) + 'websocket/';
+  var url  =  'ws' + url0.slice(4) + '/websocket' + pathname;
   var ws   = new WebSocket(url);
   var wsIn = 0
   var wsInDecompressed = 0

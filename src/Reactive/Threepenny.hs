@@ -6,7 +6,7 @@ module Reactive.Threepenny (
     -- * Types
     -- $intro
     Event, Behavior,Dynamic,
-    runDynamic,execDynamic,registerDynamic,closeDynamic,
+    runDynamic,execDynamic,registerLater,registerDynamic,closeDynamic,
 
     -- * IO
     -- | Functions to connect events to the outside world.
@@ -17,7 +17,7 @@ module Reactive.Threepenny (
     -- | Minimal set of combinators for programming with 'Event' and 'Behavior'.
     module Control.Applicative,
     never, filterJust, unionWith,
-    accumE, apply, stepper,
+    accumE, apply, stepper, stepperT,
     -- $classes
 
     -- * Derived Combinators
@@ -43,7 +43,7 @@ module Reactive.Threepenny (
     -- * Internal
     -- | Functions reserved for special circumstances.
     -- Do not use unless you know what you're doing.
-    onChange, unsafeMapIO, newEventsNamed,mapEventDyn,mapEventDynInterrupt,onEventDyn,onChangeDyn
+    onChange,onChangeDyn, unsafeMapIO, newEventsNamed,mapEventIO,mapEventDyn,mapEventDynInterrupt,mapTidingsDyn0,mapTidingsDyn,mapTidingsDynInterrupt0,mapTidingsDynInterrupt,onEventDyn,onEventDynInterrupt
     ) where
 
 import Control.Applicative
@@ -62,18 +62,27 @@ import System.IO.Unsafe
 type Pulse = Prim.Pulse
 type Latch = Prim.Latch
 type Map   = Map.Map
-type Dynamic  = State.StateT [IO ()] IO
+type Dynamic  = State.StateT ([IO ()],[IO ()]) IO
 
 
-runDynamic :: Dynamic a -> IO (a,[IO()])
-runDynamic w = State.runStateT w []
+runDynamic :: Dynamic a -> IO (a,([IO()]))
+runDynamic w = do
+  (v,(f,d)) <- State.runStateT w ([],[])
+  sequence_ d
+  return (v,f)
 
 
 execDynamic :: Dynamic a -> IO [IO()]
-execDynamic w = State.execStateT w []
+execDynamic w = do
+  (f,d) <- State.execStateT w ([],[])
+  sequence_ d
+  return f
+
+registerLater :: IO () -> Dynamic ()
+registerLater w = State.modify' (\(i,j) -> (i,w:j))
 
 registerDynamic :: IO () -> Dynamic  ()
-registerDynamic w = State.modify' (w:)
+registerDynamic w = State.modify' (\(i,j) -> (w:i,j))
 
 closeDynamic :: Dynamic a -> IO a
 closeDynamic  m = do
@@ -106,7 +115,7 @@ newtype Event    a = E { unE :: Memo (Pulse a) }
 -}
 data  Behavior a = B { latch :: Latch a, changes :: Event () }
 
-{-----------------------------------------------------------------------------
+{------------------u----------------------------------------------------------
     IO
 ------------------------------------------------------------------------------}
 -- | An /event handler/ is a function that takes an
@@ -151,7 +160,6 @@ newEventsNamed init = do
 --
 -- > do unregisterMyHandler <- register event myHandler
 --
--- FIXME: Unregistering event handlers does not work yet.
 register :: Event a -> Handler a -> Dynamic ()
 register e h = do
     p <- liftIO$ at (unE e)     -- evaluate the memoized action
@@ -172,13 +180,11 @@ onChange (B l e) h = do
     register e (\_ -> h =<< Prim.readLatch l)
 
 onChangeDyn :: Behavior a -> (a -> Dynamic ()) -> Dynamic ()
-onChangeDyn (B  l e ) hf = do
+onChangeDyn (B  l e ) hf = mdo
     -- This works because latches are updated before the handlers are being called.
     (ev,h)<-newEvent
-    bv <- mdo
-      register ((,) <$> bv <@> e) (\(~(fin,_))-> sequence_ fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))
-      bv <- stepper [] ev
-      return bv
+    register ((,) <$> bv <@> e) (\(~(fin,_))-> sequence_ fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))
+    bv <- stepper [] ev
     registerDynamic ( currentValue bv >>= sequence_ )
     return ()
 
@@ -263,6 +269,9 @@ accumB a e = do
   registerDynamic unH
   p2      <- liftIO$ Prim.mapP (const ()) p1
   return $ B l1 (E $ fromPure p2)
+
+stepperT ::  a -> Event a -> Dynamic (Tidings a)
+stepperT a e = mapAccumT a (const <$> e)
 
 accumT :: a -> Event (a ->a) -> Dynamic (Tidings a)
 accumT = mapAccumT
@@ -412,15 +421,27 @@ onEventIO e h =   register e (void . h)
 
 onEventDyn
   :: Event a ->  (a -> Dynamic b) -> Dynamic ()
-onEventDyn  e f =  do
+onEventDyn  e f =  mdo
   (efin,hfin) <- newEvent
-  bfin <- mdo
-    onEventIO ((,) <$> bfin <@>e ) (\ ~(fin,i) -> sequence_ fin >> (hfin  .snd =<< (runDynamic  ( f i) )) )
-    bfin <- stepper [] efin
-    return bfin
+  onEventIO ((,) <$> bfin <@>e ) (\ ~(fin,i) -> sequence_ fin >> (hfin  .snd =<< (runDynamic (f i) )) )
+  bfin <- stepper [] efin
   registerDynamic $ sequence_ =<< currentValue bfin
   return ()
 
+onEventDynInterrupt
+  :: Event a ->  (a -> Dynamic b) -> Dynamic ()
+onEventDynInterrupt  e f =  mdo
+  (efin,hfin) <- newEvent
+  onEventIO ((,) <$> bfin <@>e )
+    (\ ~(fin,i) -> do
+      sequence_ fin
+      forkIO (do
+          pid <- myThreadId
+          (i,s) <- runDynamic (f i)
+          hfin (killThread pid:s)))
+  bfin <- stepper [] efin
+  registerDynamic $ sequence_ =<< currentValue bfin
+  return ()
 
 
 
@@ -494,24 +515,66 @@ pair (T bx ex) (T by ey) = T b e
     y = (,) <$> bx <@> ey
     e = unionWith (\ ~(x,_) ~(_,y) -> (x,y)) x y
 
-mapEventDynInterrupt ::(a -> Dynamic b) -> Event a -> Dynamic (Event (b,[IO()]) ,Event (IO ()) )
+-- | Expose an event handler to cancel the forked computation
+mapEventDynInterrupt ::(a -> Dynamic b) -> Event a -> Dynamic (Event b)
 mapEventDynInterrupt f x = do
     (e,h) <- newEvent
-    (ei,hi) <- newEvent
-    onEventIO x (\i -> do
-      tid <- forkIO $ (runDynamic $ f i)   >>= h
-      hi (putStrLn ("thread kill "++ show tid) >> killThread tid))
+    onEventDynInterrupt x (\i -> f i  >>= liftIO . h)
+    return  e
 
-    return  (e,ei)
+mapEventIO :: (a -> IO b ) -> Event a -> Dynamic (Event b)
+mapEventIO f x= do
+    (e,h) <- newEvent
+    onEventIO x (\i -> f i >>= h)
+    return e
 
-
-
-mapEventDyn ::(a -> Dynamic b) -> Event a -> Dynamic (Event (b,[IO()]) )
+-- | Expose finalizers from the dynamic monad to clean up the event handlers.
+mapEventDyn ::(a -> Dynamic b) -> Event a -> Dynamic (Event b)
 mapEventDyn f x = do
     (e,h) <- newEvent
-    onEventIO x (\i -> void $ (runDynamic $ f i)  >>= h)
-
+    onEventDyn x (\i -> f i  >>= liftIO . h)
     return  e
+
+mapTidingsDyn0 :: a -> (a -> Dynamic b) -> Event a -> Dynamic (Tidings b)
+mapTidingsDyn0 i f e = mdo
+  ini <- liftIO $ runDynamic $ f i
+  (efin,hfin) <- newEvent
+  onEventIO ((,) <$> fmap snd (facts bfin) <@> e)
+      (\ ~(fin,i) -> do
+        sequence_ fin
+        hfin =<< runDynamic (f i))
+  rec bfin <- stepperT ini efin
+  registerDynamic $ sequence_ =<< currentValue (snd <$> facts bfin)
+  return (fst <$> bfin)
+
+mapTidingsDyn :: (a -> Dynamic b) -> Tidings a -> Dynamic (Tidings b)
+mapTidingsDyn  f x = do
+  i <- currentValue  (facts x)
+  mapTidingsDyn0 i f (rumors x)
+
+
+
+
+mapTidingsDynInterrupt0 :: a -> (a -> Dynamic b) -> Event a -> Dynamic (Tidings b)
+mapTidingsDynInterrupt0 i f e = mdo
+  ini <- liftIO $ runDynamic $ f i
+  (efin,hfin) <- newEvent
+  onEventIO ((,) <$> fmap snd (facts bfin) <@> e)
+      (\ ~(fin,i) -> do
+        sequence_ fin
+        forkIO (do
+            pid <- myThreadId
+            (i,s) <- runDynamic (f i)
+            hfin (i,killThread pid:s)))
+  bfin <- stepperT ini efin
+  registerDynamic $ sequence_ =<< currentValue (snd <$> facts bfin)
+  return (fst <$> bfin)
+
+
+mapTidingsDynInterrupt :: (a -> Dynamic b) -> Tidings a -> Dynamic (Tidings b)
+mapTidingsDynInterrupt f x = do
+  i <- currentValue  (facts x)
+  mapTidingsDynInterrupt0 i f (rumors x)
 
 
 

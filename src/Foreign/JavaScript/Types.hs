@@ -9,7 +9,7 @@ import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Data.Aeson              as JSON
 import           Data.ByteString.Char8           (ByteString)
-import qualified Data.ByteString.Char8   as BS   (hPutStrLn)
+import qualified Data.ByteString.Char8   as BS   (unpack,hPutStrLn)
 import           Data.IORef
 import           Data.String
 import           Data.Text
@@ -18,6 +18,7 @@ import           System.IO                       (stderr)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.List as L
+import Snap.Core
 
 import Data.Time
 import Foreign.RemotePtr
@@ -217,9 +218,13 @@ findBM k = L.find ((Set.member k).fst)
 emptyBM :: BufferMap k v
 emptyBM = []
 
+type EventLoop   = Request -> Comm -> IO ()
+
+cookiesMap i = Map.fromList $ (\i -> (BS.unpack $ cookieName i , BS.unpack $cookieValue i) ) <$> rqCookies (requestInfo i)
 -- | Representation of a browser window.
 data Window = Window
-    { runEval        :: CallBuffer -> STM ()
+    { requestInfo :: Request
+    , runEval        :: CallBuffer -> STM ()
     , callEval       :: TMVar (Either String JSON.Value) -> CallBuffer -> STM ()
     , wCallBuffer     :: TVar CallBuffer
     , wCallBufferMap  :: TVar (Set Coupon , BufferMap Coupon (TVar CallBuffer))
@@ -249,7 +254,7 @@ newPartialWindow = do
     let
       nop :: Monad m => b -> m ()
       nop = const $ return ()
-    Window nop undefined b1 b1i b2 b3  (return ()) nop nop ptr <$> newVendor <*> newVendor
+    Window undefined nop undefined b1 b1i b2 b3  (return ()) nop nop ptr <$> newVendor <*> newVendor
 
 -- | For the purpose of controlling garbage collection,
 -- every 'Window' as an associated 'RemotePtr' that is alive

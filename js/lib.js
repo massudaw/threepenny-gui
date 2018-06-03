@@ -18,7 +18,7 @@ Haskell.map = function (fun, array) {
 
 /////////////////////////////////////////////////////////////////////
 // Binding to events
-Haskell.bind = function (el, eventType, fun,code,async_fun) {
+Haskell.bind = function (el, eventType, code,fun) {
   var handlers = typeof(clientHandlers) == 'undefined' ? null : clientHandlers(); 
   if(eventType === 'livechange') {
     $(el).livechange(300,function(e){
@@ -42,9 +42,7 @@ Haskell.bind = function (el, eventType, fun,code,async_fun) {
     return handlers[eventType](el,eventType,fun);
   } else {
     var bf = function(event) {
-      var res = eval(code);
-        if (! async_fun)
-          fun(res);
+      eval(code);
       return true;
     }
     $(el).bind(eventType, bf);

@@ -13,10 +13,10 @@ module Foreign.JavaScript (
 
     -- * Server
     serve, Config(..), defaultConfig,
-    Window, root,
+    Window,requestInfo , root,
 
     -- * JavaScript FFI
-    JavaScriptException(..),JSCode(..),ToJS(..), FromJS, JSAsync(..),JSFunction(..),emptyFunction, JSObject,toCode,
+    JavaScriptException(..),JSCode(..),ToJS(..), FromJS, JSFunction(..),emptyFunction, JSObject,toCode,
     FFI, ffi, runFunction, runFunctionDelayed, callFunction,
     NewJSObject, unsafeCreateJSObject,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer, flushChildren, forceObject,
@@ -50,12 +50,12 @@ import GHC.Conc
 -- | Run a "Foreign.JavaScript" server.
 serve
     :: Config               -- ^ Configuration options.
-    -> (Window -> IO (IO ()))    -- ^ Initialization whenever a client connects.
+    -> (Window -> IO ())-- ^ Initialization whenever a client connects.
     -> IO ()
 serve config init = httpComm config $ eventLoop $ \w -> do
-  i <- init w
+  init w
   flushCallBuffer w   -- make sure that all `runEval` commands are executed
-  return i
+  return ()
 
 {-----------------------------------------------------------------------------
     JavaScript
@@ -66,7 +66,6 @@ serve config init = httpComm config $ eventLoop $ \w -> do
 -- and may not be run immediately. See 'setCallBufferMode'.
 runFunction :: Window -> JSFunction () -> IO ()
 runFunction w f = do
-  t0 <- getCurrentTime
   atomically. bufferRunEval w  =<< toCode f
 
 {-----------------------------------------------------------------------------
@@ -77,8 +76,7 @@ runFunction w f = do
 -- NOTE: The JavaScript function is subject to buffering,
 -- and may not be run immediately. See 'setCallBufferMode'.
 runFunctionDelayed :: Window -> JSObject -> JSFunction () -> IO ()
-runFunctionDelayed w js f = do
-  bufferRunEvalMethod w js =<< toCode f
+runFunctionDelayed w js f = bufferRunEvalMethod w js =<< toCode f
 
 
 

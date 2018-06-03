@@ -1,11 +1,11 @@
-{-# LANGUAGE RecursiveDo,ScopedTypeVariables,ExistentialQuantification,DeriveDataTypeable #-}
+{-# LANGUAGE FlexibleContexts,TupleSections,RecursiveDo,ScopedTypeVariables,ExistentialQuantification,DeriveDataTypeable #-}
 module Graphics.UI.Threepenny.Internal (
     -- * Synopsis
     -- | Internal core:
     -- 'UI' monad, integrating FRP and JavaScript FFI. garbage collection
 
     -- * Documentation
-    Window(..), disconnect,
+    Window(..), disconnect,request,
     startGUI,
 
     UI, runUI, liftIOLater, askWindow,ui,
@@ -17,9 +17,9 @@ module Graphics.UI.Threepenny.Internal (
     ffiExport, debug, timestamp,
 
     Element(..), fromJSObject, getWindow,
-    mkElementNamespace, mkElement, delete, appendChild, clearChildren,forceElement,
+    mkElementNamespace, mkElement, delete, appendChild,replaceWith , clearChildren,forceElement,
 
-    EventData, domEvent,domEventSafe,domEventAsync,domEventH, unsafeFromJSON,
+    EventData, domEvent,domEventSafe,domEventClient,domEventAsync,domEventH, unsafeFromJSON,
     ) where
 
 import Data.Time
@@ -41,6 +41,8 @@ import qualified Foreign.JavaScript      as JS
 import qualified Foreign.RemotePtr       as Foreign
 
 import qualified Reactive.Threepenny     as E
+import qualified Data.Map as M
+import qualified Data.List as L
 import Reactive.Threepenny    (Dynamic)
 
 import System.IO.Unsafe
@@ -57,6 +59,7 @@ data Wrap f = forall a . Wrap (f a)
 -- | The type 'Window' represents a browser window.
 data Window = Window
     { wId :: Int
+    , wCookies :: M.Map String String
     , wTimeZone :: TimeZone
     , wBody :: Element
     , wHead :: Element
@@ -70,14 +73,15 @@ data Window = Window
                      -- children reachable from 'Element's
     }
 
+request  = JS.requestInfo . jsWindow
+
 -- | Start server for GUI sessions.
 startGUI
     :: Config               -- ^ Server configuration.
     -> (Window -> UI ())    -- ^ Action to run whenever a client browser connects.
     ->  Dynamic Int
-    -> (Window -> IO ())
     -> IO ()
-startGUI config init preinit finalizer = JS.serve config ( \w -> do
+startGUI config init preinit = JS.serve config ( \w -> do
     -- set up disconnect event
     ((eDisconnect, handleDisconnect),dis) <- E.runDynamic $ E.newEvent
 
@@ -87,7 +91,7 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
     wAllEvents   <- Foreign.newVendor
     wChildren <- Foreign.newVendor
     timezone <- jsTimeZone w
-    (windowId ,finini) <- E.runDynamic $ preinit
+    (windowId ,finini) <- E.runDynamic preinit
     window <- mdo
       let window = Window
               { wId = windowId
@@ -105,11 +109,11 @@ startGUI config init preinit finalizer = JS.serve config ( \w -> do
       h <- fromJSObject0  jsh window
       b <- fromJSObject0  jsb window
       return window
-    JS.onDisconnect w $ finalizer window >> sequence_ finini
+    JS.onDisconnect w $ sequence_ finini
     -- run initialization
-    fin <- E.execDynamic ( runUI window $ init window)
+    fin <- E.execDynamic (runUI window $ init window)
     JS.onDisconnect w $ sequence_ fin
-    return (finalizer window))
+    )
 
 -- | Event that occurs whenever the client has disconnected,
 -- be it by closing the browser window or by exception.
@@ -182,24 +186,45 @@ fromJSObject el = do
         Foreign.addReachable (JS.root $ jsWindow window) el
         fromJSObject0 el window
 
-addEventIO :: String -> JSFunction a -> Bool -> JS.JSObject -> Window -> Dynamic (E.Event a)
-addEventIO name fun@(JSFunction _ m ) async el Window{ jsWindow = w, wAllEvents = wAllEvents} = do
+data EventFunction a
+  = AsyncEventFunction (JS.JSObject -> JSFunction a)
+  | SyncEventFunction  (JSFunction a)
+  | ClientEventFunction  (JSFunction a)
+
+addEventIO :: String -> EventFunction a -> JS.JSObject -> Window -> Dynamic (E.Event a)
+addEventIO name fun el Window{ jsWindow = w, wAllEvents = wAllEvents} = do
     -- Lazily create FRP events whenever they are needed.
     --
     let initializeEvent (name,fun,handler) = do
-            handlerPtr <- liftIO $ JS.exportHandler w handler
-            -- make handler reachable from element
-            liftIO $ Foreign.addReachable el handlerPtr
-            E.registerDynamic (Foreign.destroy handlerPtr)
-            v <- liftIO $ code fun
-            bptr <- liftIO . JS.unsafeCreateJSObject w $
-              ffi "Haskell.bind(%1,%2,%3,%4,%5)" el name handlerPtr (unJSCode v)  async
+            let makePtr m2= do
+                  handlerPtr <- liftIO $ JS.exportHandler w (handler <=< m2 w)
+                  -- make handler reachable from element
+                  liftIO $ Foreign.addReachable el handlerPtr
+                  E.registerDynamic (Foreign.destroy handlerPtr)
+                  return handlerPtr
+            bptr <- case fun of
+              ClientEventFunction fun@(JSFunction _ m) -> do
+                v <- liftIO $ code fun
+                handlerPtr <- makePtr m
+                liftIO . JS.unsafeCreateJSObject w $
+                  ffi "Haskell.bind(%1,%2,%3,%4)" el name (unJSCode v) handlerPtr
+              SyncEventFunction fun@(JSFunction _ m)-> do
+                v <- liftIO $ code fun
+                handlerPtr <- makePtr m
+                liftIO . JS.unsafeCreateJSObject w $
+                  ffi "Haskell.bind(%1,%2,'%3(' + %4 +')')" el name handlerPtr (unJSCode v)
+              AsyncEventFunction fun -> mdo
+                let ~afun@(JSFunction _ m) = fun handlerPtr
+                handlerPtr <- makePtr m
+                v <- liftIO $ code afun
+                liftIO . JS.unsafeCreateJSObject w $
+                  ffi "Haskell.bind(%1,%2,%3)" el name (unJSCode v)
             E.registerDynamic $ JS.runFunction w $
               ffi "Haskell.unbind(%1,%2,%3)" el name bptr
 
 
     (e,h) <- E.newEvent
-    initializeEvent (name,fun,(h <=< m w ))
+    initializeEvent (name,fun,h)
     liftIO $ Foreign.withRemotePtr el $ \coupon _ -> do
         ptr <- Foreign.newRemotePtr coupon (Wrap e) wAllEvents
         Foreign.addReachable el ptr
@@ -216,7 +241,7 @@ addEvents el Window{ jsWindow = w, wEvents = wEvents } = do
             -- make handler reachable from element
             Foreign.addReachable el handlerPtr
             bptr <- JS.unsafeCreateJSObject w $
-                ffi "Haskell.bind(%1,%2,%3)" el name handlerPtr
+                ffi "Haskell.bind(%1,%2,'',%3)" el name handlerPtr
             return ()
 
 
@@ -281,7 +306,11 @@ domEventH
     -> UI (E.Event a)
 domEventH name el fun = do
   w <- liftIO $getWindow el
-  ui $ addEventIO name fun False (toJSObject el) w
+  ui $ addEventIO name (SyncEventFunction fun) (toJSObject el) w
+
+domEventClient name el fun= do
+  w <- liftIO $getWindow el
+  ui $ addEventIO name (ClientEventFunction fun) (toJSObject el) w
 
 domEventAsync
     :: String
@@ -290,11 +319,11 @@ domEventAsync
         --   Note that the @on@-prefix is not included,
         --   the name is @click@ and so on.
     -> Element          -- ^ Element where the event is to occur.
-    -> JSAsync a
+    -> (JSObject -> JSFunction a)
     -> UI (E.Event a)
-domEventAsync name el (JSAsync fun) = do
+domEventAsync name el fun = do
   w <- liftIO $getWindow el
-  ui $ addEventIO name fun True (toJSObject el) w
+  ui $ addEventIO name (AsyncEventFunction fun) (toJSObject el) w
 
 
 async :: JSCode
@@ -340,14 +369,21 @@ forceElement :: Element -> UI ()
 forceElement el = liftJSWindow $ \w -> do
   JS.forceObject w (toJSObject el)
 
+replaceWith :: Element -> Element -> UI ()
+replaceWith parent child  = liftJSWindow $ \w -> do
+  Foreign.clearReachable (elChildren parent)
+  Foreign.addReachable (elChildren parent) (toJSObject child)
+  JS.runFunction w $ ffi "Haskell.replaceStablePtr(%1,%2)" (toJSObject parent) (toJSObject child)
+  JS.flushChildren w (toJSObject parent) (toJSObject child)
+
 -- | Append a child element.
 appendChild :: Element -> Element -> UI ()
 appendChild parent child = liftJSWindow $ \w -> do
-    -- FIXME: We have to stop the child being reachable from its
-    -- /previous/ parent.
-    Foreign.addReachable (elChildren parent) (toJSObject child)
-    JS.runFunction w $ ffi "$(%1).append($(%2))" (toJSObject parent) (toJSObject child)
-    JS.flushChildren w (toJSObject parent) (toJSObject child)
+  -- FIXME: We have to stop the child being reachable from its
+  -- /previous/ parent.
+  Foreign.addReachable (elChildren parent) (toJSObject child)
+  JS.runFunction w $ ffi "$(%1).append($(%2))" (toJSObject parent) (toJSObject child)
+  JS.flushChildren w (toJSObject parent) (toJSObject child)
 
 
 {-----------------------------------------------------------------------------

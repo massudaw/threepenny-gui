@@ -24,7 +24,7 @@ main = do
     startGUI defaultConfig
         { jsCustomHTML = Just "chat.html"
         , jsStatic     = Just static
-        } ( setup messages) (return 1) (\_ -> return ())
+        } ( setup messages) (return 1)
 
 type Message = (UTCTime, String, String)
 

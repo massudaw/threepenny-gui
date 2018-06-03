@@ -37,7 +37,7 @@ import Foreign.JavaScript.Types
     HTTP Server using WebSockets
 ------------------------------------------------------------------------------}
 -- | Run a HTTP server that creates a 'Comm' channel.
-httpComm :: Config -> (Comm -> IO ()) -> IO ()
+httpComm :: Config -> EventLoop -> IO ()
 httpComm Config{..} worker = do
     env <- getEnvironment
     let portEnv = Safe.readMay =<< Prelude.lookup "PORT" env
@@ -63,12 +63,14 @@ httpComm Config{..} worker = do
         ++ routeWebsockets dictEnv worker
 
 -- | Route the communication between JavaScript and the server
-routeWebsockets :: Maybe String -> (Comm -> IO void) -> Routes
+routeWebsockets :: Maybe String -> EventLoop  -> Routes
 routeWebsockets dict worker = [("websocket", response)]
     where
-    response = WS.runWebSocketsSnap $ \ws -> void $ do
+    response = do
+      requestInfo <- getRequest
+      WS.runWebSocketsSnap $ \ws -> void $ do
         comm <- communicationFromWebSocket dict ws
-        worker comm
+        worker requestInfo comm
         -- error "Foreign.JavaScript: unreachable code path."
 
 -- | Create 'Comm' channel from WebSocket request.
