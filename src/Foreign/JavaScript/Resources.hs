@@ -6,8 +6,8 @@ import qualified Data.Text                  as Text
 import           Foreign.JavaScript.Include
 
 
-jsDriverCode :: Text
-jsDriverCode = Text.unlines $ map Text.pack
+jsDriverCode :: Maybe String -> Text
+jsDriverCode dict = Text.unlines $ map Text.pack
     [ $(include "js/lib/jquery.js")
     , $(include "js/lib/jquery-cookie.js")
     , "var Haskell = {};" ++ maybe "" (\dict -> "dict = \""++ dict++ "\";") dict

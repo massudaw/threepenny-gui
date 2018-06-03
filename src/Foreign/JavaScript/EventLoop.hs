@@ -192,7 +192,6 @@ flushDirtyBuffer comm w@Window{..} = do
           total = round $ diffUTCTime tl ti *1000
       if delta > flush_limit_min || total > flush_limit_max
         then do
-          unsafeIOToSTM (print (ix,diffUTCTime tc tl ,diffUTCTime tl ti))
           flushCallBufferSTM w
           return flush_limit_min
         else do
