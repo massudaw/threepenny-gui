@@ -21,7 +21,7 @@ module Graphics.UI.Threepenny.Core (
     Element, getWindow, mkElement, mkElementNamespace, delete,
         string,
         getHead, getBody,addHead,addBody,
-        (#+), children,root, text, html, attr,attrJS, style, value,valueFFI,
+        (#+), children,addChild,root, text, html, attr,attrJS, style, value,valueFFI,
     getElementsByTagName, getElementById, getElementsByClassName,
 
     -- * Layout
@@ -116,6 +116,15 @@ children = mkWriteAttr set
     set xs x = do
         Core.clearChildren x
         mapM_ (Core.appendChild x) xs
+
+addChild :: WriteAttr Element Element
+addChild = mkWriteAttr set
+    where
+    set xs x = do
+        Core.appendChild x xs
+        w <- askWindow
+        ui $ registerDynamic $ void $ runDynamic $ runUI w $  Core.removeChild x xs
+
 
 root :: WriteAttr Element Element
 root = mkWriteAttr (flip Core.replaceWith)

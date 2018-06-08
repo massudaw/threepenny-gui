@@ -6,7 +6,7 @@ module Foreign.RemotePtr (
 
     -- * RemotePtr
     RemotePtr,
-    withRemotePtr, addFinalizer, destroy, addReachable, clearReachable,
+    withRemotePtr, addFinalizer, destroy, addReachable,removeReachable , clearReachable,
     unprotectedGetCoupon,
 
     -- * Coupons and Vendors
@@ -86,7 +86,7 @@ data RemoteData a = RemoteData
     { self     :: Weak (RemotePtr a)
     , coupon   :: Coupon
     , value    :: a
-    , children :: IORef [SomeWeak]
+    , children :: IORef (Store SomeWeak)
     }
 
 -- Existentially quantified weak pointer. We only care about its finalizer.
@@ -130,7 +130,7 @@ newCoupon Vendor{..} =
 -- | Create a new 'RemotePtr' from a 'Coupon' and register it with a 'Vendor'.
 newRemotePtr :: Coupon -> a -> Vendor a -> IO (RemotePtr a)
 newRemotePtr coupon value Vendor{..} = do
-    children <- newIORef []
+    children <- newIORef Map.empty
     let self = undefined
     ptr      <- newIORef RemoteData{..}
 
@@ -197,16 +197,23 @@ destroy ptr = finalize =<< self <$> readIORef ptr
 -- as it allows all child object to be garbage collected at once.
 addReachable :: RemotePtr a -> RemotePtr b -> IO ()
 addReachable parent child = do
+    ix  <- coupon <$> readIORef child
     w   <- mkWeakIORefValue parent child $ return ()
     ref <- children <$> readIORef parent
-    atomicModifyIORef' ref $ \ws -> (SomeWeak w:ws, ())
+    atomicModifyIORef' ref $ \ws -> (Map.insert ix (SomeWeak w) ws, ())
 
 -- | Clear all dependencies.
 --
 -- Reachability of this 'RemotePtr' no longer implies reachability
 -- of other items, as formerly implied by calls to 'addReachable'.
+removeReachable :: RemotePtr b -> RemotePtr a -> IO ()
+removeReachable parent child = do
+    ix  <- coupon <$> readIORef child
+    ref <- children <$> readIORef parent
+    xs  <- atomicModifyIORef' ref $ \xs -> (Map.delete ix xs, xs)
+    sequence_ [finalize x | SomeWeak x <- Map.elems xs]
 clearReachable :: RemotePtr a -> IO ()
 clearReachable parent = do
     ref <- children <$> readIORef parent
-    xs  <- atomicModifyIORef' ref $ \xs -> ([], xs)
-    sequence_ [finalize x | SomeWeak x <- xs]
+    xs  <- atomicModifyIORef' ref $ \xs -> (Map.empty, xs)
+    sequence_ [finalize x | SomeWeak x <- Map.elems xs]

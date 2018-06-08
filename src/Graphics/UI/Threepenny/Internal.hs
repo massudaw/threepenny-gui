@@ -17,7 +17,7 @@ module Graphics.UI.Threepenny.Internal (
     ffiExport, debug, timestamp,
 
     Element(..), fromJSObject, getWindow,
-    mkElementNamespace, mkElement, delete, appendChild,replaceWith , clearChildren,forceElement,
+    mkElementNamespace, mkElement, delete, appendChild,removeChild,replaceWith , clearChildren,forceElement,
 
     EventData, domEvent,domEventSafe,domEventClient,domEventAsync,domEventH, unsafeFromJSON,
     ) where
@@ -375,6 +375,15 @@ replaceWith parent child  = liftJSWindow $ \w -> do
   Foreign.addReachable (elChildren parent) (toJSObject child)
   JS.runFunction w $ ffi "Haskell.replaceStablePtr(%1,%2)" (toJSObject parent) (toJSObject child)
   JS.flushChildren w (toJSObject parent) (toJSObject child)
+
+-- | Remove a child element.
+removeChild :: Element -> Element -> UI ()
+removeChild parent child = liftJSWindow $ \w -> do
+  -- FIXME: We have to stop the child being reachable from its
+  -- /previous/ parent.
+  JS.runFunction w $ ffi "%1.removeChild(%2)" (toJSObject parent) (toJSObject child)
+  Foreign.removeReachable (elChildren parent) (toJSObject child)
+
 
 -- | Append a child element.
 appendChild :: Element -> Element -> UI ()
