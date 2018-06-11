@@ -279,14 +279,19 @@ on f x = void . onEvent (f x)
 onEvent :: Event a -> (a -> UI void) -> UI ()
 onEvent e h = do
     window <- askWindow
-    ui $ Reactive.onEventDyn e (void . runUI window . h)
+    liftIOLater $ do
+      Reactive.onEventDyn e (void . runUI window . h)
 
 -- | Execute a 'UI' action whenever a 'Behavior' changes.
 -- Use sparingly, it is recommended that you use 'sink' instead.
 onChanges :: Behavior a -> (a -> UI void) -> UI ()
 onChanges b f = do
     window <- askWindow
-    ui $ Reactive.onChangeDyn b (void . runUI window . f)
+    liftIOLater $ do
+      i <- currentValue b
+      dyn <- liftIO . execDynamic . runUI window $ f i
+      Reactive.onChangeDynIni dyn b (void . runUI window . f)
+      -- Reactive.onChangeDyn b (void . runUI window . f)
 
 
 mapEventUI f e =  do
@@ -380,8 +385,8 @@ sink attr bi mx = do
     window <- askWindow
     liftIOLater $ do
         i <- currentValue bi
-        runUI window $ set' attr i x
-        Reactive.onChangeDyn bi  $ \i -> void $ runUI window $ set' attr i x
+        dyn <- liftIO $ execDynamic $ runUI window $ set' attr i x
+        Reactive.onChangeDynIni dyn  bi  $ \i -> void $ runUI window $ set' attr i x
         return ()
     return x
 
@@ -391,11 +396,13 @@ sinkDiff attr bi mx = do
     window <- askWindow
     liftIOLater $ do
         i <- currentValue (facts bi)
-        runUI window $ set' attr i x
+        dyn <- liftIO $ execDynamic $ runUI window $ set' attr i x
         let bdiff = filterJust $ (\i j ->if i == j then Nothing else Just j ) <$> facts bi <@> rumors bi
-        Reactive.onEventDyn bdiff  $ \i -> void $ runUI window $ set' attr i x
+        bdiffnew <- stepper i bdiff
+        Reactive.onChangeDynIni dyn   bdiffnew $ \i -> void $ runUI window $ set' attr i x
         return ()
     return x
+
 
 liftUILater :: UI () ->  UI ()
 liftUILater a = do

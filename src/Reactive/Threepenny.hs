@@ -6,7 +6,7 @@ module Reactive.Threepenny (
     -- * Types
     -- $intro
     Event, Behavior,Dynamic,
-    runDynamic,execDynamic,registerLater,registerDynamic,closeDynamic,
+    runDynamic,execDynamic,registerDynamic,closeDynamic,
 
     -- * IO
     -- | Functions to connect events to the outside world.
@@ -43,7 +43,7 @@ module Reactive.Threepenny (
     -- * Internal
     -- | Functions reserved for special circumstances.
     -- Do not use unless you know what you're doing.
-    onChange,onChangeDyn, unsafeMapIO, newEventsNamed,mapEventIO,mapEventDyn,mapEventDynInterrupt,mapTidingsDyn0,mapTidingsDyn,mapTidingsDynInterrupt0,mapTidingsDynInterrupt,onEventDyn,onEventDynInterrupt
+    onChange,onChangeDyn,onChangeDynIni, unsafeMapIO, newEventsNamed,mapEventIO,mapEventDyn,mapEventDynInterrupt,mapTidingsDyn0,mapTidingsDyn,mapTidingsDynInterrupt0,mapTidingsDynInterrupt,onEventDyn,onEventDynInterrupt
     ) where
 
 import Control.Applicative
@@ -62,27 +62,22 @@ import System.IO.Unsafe
 type Pulse = Prim.Pulse
 type Latch = Prim.Latch
 type Map   = Map.Map
-type Dynamic  = State.StateT ([IO ()],[IO ()]) IO
+type Dynamic  = State.StateT [IO ()] IO
 
 
 runDynamic :: Dynamic a -> IO (a,([IO()]))
 runDynamic w = do
-  (v,(f,d)) <- State.runStateT w ([],[])
-  sequence_ d
+  (v,f) <- State.runStateT w []
   return (v,f)
 
 
 execDynamic :: Dynamic a -> IO [IO()]
 execDynamic w = do
-  (f,d) <- State.execStateT w ([],[])
-  sequence_ d
-  return f
+  State.execStateT w ([])
 
-registerLater :: IO () -> Dynamic ()
-registerLater w = State.modify' (\(i,j) -> (i,w:j))
 
 registerDynamic :: IO () -> Dynamic  ()
-registerDynamic w = State.modify' (\(i,j) -> (w:i,j))
+registerDynamic w = State.modify' (\(i) -> (w:i))
 
 closeDynamic :: Dynamic a -> IO a
 closeDynamic  m = do
@@ -179,13 +174,24 @@ onChange (B l e) h = do
     -- This works because latches are updated before the handlers are being called.
     register e (\_ -> h =<< Prim.readLatch l)
 
+onChangeDynIni :: [IO ()] -> Behavior a -> (a -> Dynamic ()) -> Dynamic ()
+onChangeDynIni ini (B l e ) hf = mdo
+    -- This works because latches are updated before the handlers are being called.
+    (ev,h) <-newEvent
+    register ((,) <$> bv <@> e) (\(~(fin,i))-> sequence_ fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))
+    bv <- stepper ini  ev
+    registerDynamic ( currentValue bv >>= sequence_)
+    return ()
+
+
 onChangeDyn :: Behavior a -> (a -> Dynamic ()) -> Dynamic ()
 onChangeDyn (B  l e ) hf = mdo
-    -- This works because latches are updated before the handlers are being called.
-    (ev,h)<-newEvent
-    register ((,) <$> bv <@> e) (\(~(fin,_))-> sequence_ fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))
-    bv <- stepper [] ev
-    registerDynamic ( currentValue bv >>= sequence_ )
+    inil <- liftIO (Prim.readLatch l)
+    v <- liftIO $ unsafeInterleaveIO $ execDynamic $ hf  inil
+    (ev,h) <-newEvent
+    register ((,) <$> bv <@> e) (\(~(fin,i))-> sequence_ fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))
+    bv <- stepper v ev
+    registerDynamic (currentValue bv >>= sequence_)
     return ()
 
 
@@ -425,7 +431,7 @@ onEventDyn  e f =  mdo
   (efin,hfin) <- newEvent
   onEventIO ((,) <$> bfin <@>e ) (\ ~(fin,i) -> sequence_ fin >> (hfin  .snd =<< (runDynamic (f i) )) )
   bfin <- stepper [] efin
-  registerDynamic $ sequence_ =<< currentValue bfin
+  registerDynamic $ ((sequence_ =<< currentValue bfin) )
   return ()
 
 onEventDynInterrupt
@@ -581,22 +587,62 @@ mapTidingsDynInterrupt f x = do
 {-----------------------------------------------------------------------------
     Test
 ------------------------------------------------------------------------------}
-test :: Dynamic (Int -> IO ())
+test :: Dynamic ()
 test = do
   (e1,fire) <- newEvent
   e2 <- accumE 0 $ (+) <$> e1
   _  <- register e2 print
 
-  return fire
+  liftIO $ fire 1
+  liftIO $ fire 2
+  return ()
 
-test_recursion1 :: Dynamic (IO ())
+test_recursion1 :: Dynamic ()
 test_recursion1 = mdo
     (e1, fire) <- newEvent
     let e2 :: Event Int
         e2 = apply (const <$> b) e1
     b  <- accumB 0 $ (+1) <$ e2
-    _  <- register e2 print
+    register e2 print
+    liftIO $ fire ()
+    liftIO $ fire ()
+    liftIO $ fire ()
 
-    return $ fire ()
+test_finalizer :: IO ()
+test_finalizer = do
+  (fire ,fin) <- runDynamic $ mdo
+    (e1, fire) <- newEvent
+    bi <- stepper 0 e1
+    bj <- accumB 0 ((+) <$>e1)
+    onChangeDyn (bi) (\i -> do
+      liftIO $ print ("hold",i)
+      registerDynamic ( print ("removeHold",i))
+      onChangeDyn (bj) (\i -> do
+        liftIO . print$ ("accum",i )
+        registerDynamic ((print ("removeAccum",i)))))
+    return fire
+  liftIO $fire 1
+  liftIO $ fire 2
+  liftIO $ fire 3
+  sequence_ fin
+  return ()
+
+test_finalizer_onevent :: Dynamic ()
+test_finalizer_onevent = mdo
+  (e1, fire) <- newEvent
+  bi <- stepperT 0 e1
+  bj <- accumT 0 ((+) <$>e1)
+  onEventDyn (rumors bi) (\i -> do
+    liftIO $ print ("hold",i)
+    registerDynamic ( print ("removeHold",i))
+    onEventDyn (rumors bj)  (\i -> do
+      liftIO . print$ ("accum",i )
+      registerDynamic (  (print ("removeAccum",i)))))
+  liftIO $fire 1
+  liftIO $ fire 2
+  liftIO $ fire 3
+  return ()
+
+
 
 

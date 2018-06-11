@@ -22,6 +22,7 @@ import qualified Data.Text             as T
 import qualified Data.IntMap as Map
 import Data.Functor
 import Data.IORef
+import Data.Maybe(isJust,maybeToList)
 
 import           System.IO.Unsafe         (unsafePerformIO)
 import           System.Mem.Weak          hiding (addFinalizer)
@@ -206,12 +207,14 @@ addReachable parent child = do
 --
 -- Reachability of this 'RemotePtr' no longer implies reachability
 -- of other items, as formerly implied by calls to 'addReachable'.
-removeReachable :: RemotePtr b -> RemotePtr a -> IO ()
+removeReachable :: RemotePtr b -> RemotePtr a -> IO Bool
 removeReachable parent child = do
     ix  <- coupon <$> readIORef child
     ref <- children <$> readIORef parent
-    xs  <- atomicModifyIORef' ref $ \xs -> (Map.delete ix xs, xs)
-    sequence_ [finalize x | SomeWeak x <- Map.elems xs]
+    xs  <- atomicModifyIORef' ref $ \xs -> (Map.delete ix xs, Map.lookup ix xs)
+    sequence_ [finalize x | SomeWeak x <- maybeToList xs]
+    return $ isJust xs
+
 clearReachable :: RemotePtr a -> IO ()
 clearReachable parent = do
     ref <- children <$> readIORef parent

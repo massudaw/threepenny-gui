@@ -381,8 +381,9 @@ removeChild :: Element -> Element -> UI ()
 removeChild parent child = liftJSWindow $ \w -> do
   -- FIXME: We have to stop the child being reachable from its
   -- /previous/ parent.
-  JS.runFunction w $ ffi "%1.removeChild(%2)" (toJSObject parent) (toJSObject child)
-  Foreign.removeReachable (elChildren parent) (toJSObject child)
+  v <- Foreign.removeReachable (elChildren parent) (toJSObject child)
+  when v  $
+    JS.runFunction w $ ffi "%1.removeChild(%2)" (toJSObject parent) (toJSObject child)
 
 
 -- | Append a child element.
