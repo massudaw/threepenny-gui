@@ -16,10 +16,6 @@ Haskell.createWebSocket = function (url0, receive,pathname) {
   var that = {};
   var url  =  'ws' + url0.slice(4) + '/websocket' + pathname;
   var ws   = new WebSocket(url);
-  var wsIn = 0
-  var wsInDecompressed = 0
-  var wsOut = 0
-  var wsOutDecompressed = 0
   
   // Close WebSocket when the browser window is closed.
   $(window).unload( function () {
@@ -28,14 +24,12 @@ Haskell.createWebSocket = function (url0, receive,pathname) {
 
   // Send ping message in regular intervals.
   // We expect pong messages in return to keep the connection alive.
-  compress = function (i) { return typeof dict == 'undefined' ? i : pako.deflate(i,{dictionary:dict})}
-  decompress = function (i) { return typeof dict == 'undefined' ? String.fromCharCode.apply(null, new Uint8Array(i))  : pako.inflate(i,{to:'string',dictionary:dict})}
   var received = false;
   var ping = function () {
     
     // Only send a ping when it has a chance to reach the server.
   if (ws.readyState !== WebSocket.CLOSING && ws.readyState !== WebSocket.CLOSED) {
-      ws.send(compress("ping"));
+      ws.send("ping");
       window.setTimeout(ping,2000);
   };
   }
@@ -45,18 +39,9 @@ Haskell.createWebSocket = function (url0, receive,pathname) {
     ping();
     ws.onmessage = function (msg) {
       received = true;
-      var myfile = new FileReader()
-      myfile.addEventListener('loadend',function(e){
-      // Haskell.log("WebSocket message: %o",msg);
-      var data = decompress(e.target.result); 
-      wsInDecompressed = data.length + wsInDecompressed ;
-      document.getElementById("wsLogger").innerHTML = Math.floor(wsIn/1024) + '/' + Math.floor(wsInDecompressed/1024) + 'KB';
-      if (data !== "pong") {
-        receive(JSON.parse(data));
+      if (msg.data !== '' && msg.data !== "pong") {
+        receive(JSON.parse(msg.data));
       }
-      })
-      wsIn = msg.data.size + wsIn;
-      myfile.readAsArrayBuffer(msg.data);
     };
     ws.onclose = function (e) {
       Haskell.log("WebSocket closed: %o", e);
@@ -69,10 +54,10 @@ Haskell.createWebSocket = function (url0, receive,pathname) {
   // Send a JSON message to the server
   that.send = function (json) {
     Haskell.log("Client message: %o", json);
-    ws.send(compress(JSON.stringify(json)));
+    ws.send(JSON.stringify(json));
   };
   // Close the connection
-  that.close = function () { ws.send(compress("quit")); };
+  that.close = function () { ws.send("quit"); };
   
   return that;
 };

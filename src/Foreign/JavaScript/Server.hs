@@ -26,7 +26,6 @@ import qualified Network.WebSockets.Snap       as WS
 import           Snap.Core
 import qualified Snap.Http.Server              as Snap
 import           Snap.Util.FileServe
-import qualified Codec.Compression.Zlib as GZip
 import Data.String (fromString)
 
 -- import internal modules
@@ -68,7 +67,7 @@ routeWebsockets dict worker = [("websocket", response)]
     where
     response = do
       requestInfo <- getRequest
-      WS.runWebSocketsSnap $ \ws -> void $ do
+      WS.runWebSocketsSnapWith  (WS.defaultConnectionOptions {WS.connectionCompressionOptions = WS.PermessageDeflateCompression  WS.defaultPermessageDeflate } ) $ \ws -> void $ do
         comm <- communicationFromWebSocket dict ws
         worker requestInfo comm
         -- error "Foreign.JavaScript: unreachable code path."
@@ -84,20 +83,18 @@ communicationFromWebSocket dict request = do
     -- write data to browser
     --
     let
-      compress  dict = GZip.compressWith (GZip.defaultCompressParams {GZip.compressDictionary = Just $ BS.pack dict , GZip.compressLevel = GZip.BestSpeed})
-      decompress dict = GZip.decompressWith (GZip.defaultDecompressParams {GZip.decompressDictionary = Just $ BS.pack dict})
-
       sendData = forever $ (do
             x <- atomically $ STM.readTQueue commOut
             -- see note [ServerMsg strictness]
             let message =  JSON.encode $ x
-            WS.sendBinaryData connection . maybe id compress dict $ message )
+            when (not $ LBS.null message ) $
+              WS.sendTextData connection  message )
 
     -- read data from browser
     let readData = forever $  (do
             input <- WS.receiveData connection
-            case (maybe id decompress dict ) input of
-                "ping" -> (WS.sendBinaryData connection . (maybe id compress dict). LBS.pack $ "pong")
+            case input of
+                "ping" -> WS.sendTextData connection . LBS.pack $  "pong"
                 "quit" -> E.throw WS.ConnectionClosed
                 input  -> case JSON.decode  input of
                     Just x   -> atomically $ STM.writeTQueue commIn x

@@ -10,7 +10,7 @@ jsDriverCode :: Maybe String -> Text
 jsDriverCode dict = Text.unlines $ map Text.pack
     [ $(include "js/lib/jquery.js")
     , $(include "js/lib/jquery-cookie.js")
-    , "var Haskell = {};" ++ maybe "" (\dict -> "dict = \""++ dict++ "\";") dict
+    , "var Haskell = {};"
     , $(include "js/comm.js")
     , $(include "js/ffi.js")
     , $(include "js/lib.js")

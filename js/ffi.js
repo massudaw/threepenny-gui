@@ -136,7 +136,9 @@ Haskell.initFFI = function () {
   };
 
   Haskell.freeStablePtr = function (ptr) {
-    delete stablePtrs[ptr].stablePtr;
-    delete stablePtrs[ptr];
+    if(stablePtrs[ptr]){
+      delete stablePtrs[ptr].stablePtr;
+      delete stablePtrs[ptr];
+    }
   };
 };

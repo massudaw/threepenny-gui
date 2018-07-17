@@ -8,6 +8,7 @@ module Foreign.JavaScript.EventLoop (
     ) where
 
 import           Control.Applicative
+import Control.DeepSeq
 import           Control.Concurrent
 import           Control.Concurrent.Async
 import           Control.Concurrent.STM   as STM
@@ -71,9 +72,9 @@ eventLoop init cookie comm = do
 
     -- FFI calls are made by writing to the `calls` queue.
     let run msg =
-          ifOpen comm $ writeTQueue calls (Nothing , msg)
+          ifOpen comm $ writeTQueue calls (Nothing , force msg)
         call ref  msg =
-          ifOpen comm $ writeTQueue calls (Just ref, msg)
+          ifOpen comm $ writeTQueue calls (Just ref, force msg)
         debug    s =
           atomically $ ifOpen comm$ writeServer comm $ Debug s
 

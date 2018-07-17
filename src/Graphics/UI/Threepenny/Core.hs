@@ -323,7 +323,7 @@ infixl 8 #.
 -- >     # set draggable True
 -- >     # set children  otherElements
 (#) :: a -> (a -> b) -> b
-(#) = flip ($)
+(#) = flip ($!)
 
 -- | Convenient combinator for setting the CSS class on element creation.
 (#.) :: UI Element -> String -> UI Element

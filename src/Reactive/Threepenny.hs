@@ -282,7 +282,8 @@ stepperT a e = mapAccumT a (const <$> e)
 accumT :: a -> Event (a ->a) -> Dynamic (Tidings a)
 accumT = mapAccumT
 
-mapAccumT i e= uncurry (flip tidings) <$> mapAccum i ((\i -> dup . i )<$> e)
+mapAccumT :: a -> Event (a ->a) -> Dynamic (Tidings a)
+mapAccumT !i e= uncurry (flip tidings) <$> mapAccum i ((\i -> dup . i )<$> e)
   where dup (!i) = (i,i)
 
 -- | Construct a time-varying function from an initial value and
