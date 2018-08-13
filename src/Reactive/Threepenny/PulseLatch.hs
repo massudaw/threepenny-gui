@@ -194,6 +194,16 @@ mapL :: (a -> b) -> Latch a -> (Latch b)
 mapL f l =
   Latch { readL = f <$> readL l }
 
+{-# RULES
+"mapL/mapL" forall f g xs . mapL f (mapL g xs) = mapL (f . g) xs
+ #-}
+{-# RULES
+
+"identity" forall f x .  mapL f  (pureL x) = pureL (f x);
+"applicative homomorphism" forall f x .  pureL f `applyL` pureL x = pureL (f x);
+"applicative interchange" forall u y .  u `applyL` pureL y = pureL ($ y) `applyL` u
+ #-}
+
 
 
 -- | Read the value of a 'Latch' at a particular moment in Build.

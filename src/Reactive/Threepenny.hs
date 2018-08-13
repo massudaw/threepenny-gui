@@ -18,6 +18,7 @@ module Reactive.Threepenny (
     module Control.Applicative,
     never, filterJust, unionWith,
     accumE, apply, stepper, stepperT,
+    emap,
     -- $classes
 
     -- * Derived Combinators
@@ -136,7 +137,7 @@ newEventsNamed :: Ord name
     -> IO (name -> IO(Event a))                 -- ^ Series of events.
 newEventsNamed init = do
     eventsRef <- newIORef Map.empty
-    return $ \name  -> fmap E $ memoize $ do
+    return $ \name  -> return $ E $ memoize $ do
         events <- readIORef eventsRef
         case Map.lookup name events of
             Just p  -> return p
@@ -210,6 +211,7 @@ instance Functor Event where
 emap :: (a ->b ) -> Event a -> Event b
 emap f (E e) = E $ liftMemo1 (Prim.mapP f) e
 
+
 {-# NOINLINE[1] emap #-}
 {-# RULES
 "emap/emap" forall f g xs . emap f (emap g xs) = emap (f . g) xs
@@ -277,14 +279,8 @@ accumB a e = do
   return $ B l1 (E $ fromPure p2)
 
 stepperT ::  a -> Event a -> Dynamic (Tidings a)
-stepperT a e = mapAccumT a (const <$> e)
+stepperT a e = accumT a (const <$> e)
 
-accumT :: a -> Event (a ->a) -> Dynamic (Tidings a)
-accumT = mapAccumT
-
-mapAccumT :: a -> Event (a ->a) -> Dynamic (Tidings a)
-mapAccumT !i e= uncurry (flip tidings) <$> mapAccum i ((\i -> dup . i )<$> e)
-  where dup (!i) = (i,i)
 
 -- | Construct a time-varying function from an initial value and
 -- a stream of new values. Think of it as
@@ -310,7 +306,18 @@ accumE :: a -> Event (a -> a) -> Dynamic (Event a)
 accumE a e = do
   (_,p,unH) <-  liftIO $ Prim.accumL a =<< at (unE e)
   registerDynamic unH
+
+
+
   return $ E $ fromPure p
+
+accumT :: a -> Event (a -> a) -> Dynamic (Tidings a)
+accumT a e = do
+  (l1,p,unH) <-  liftIO $ Prim.accumL a =<< at (unE e)
+  registerDynamic unH
+  p2 <- liftIO$ Prim.mapP (const ()) p
+  return $ tidings  (B l1 (E $ fromPure p2)) (E $ fromPure p)
+
 
 instance Functor Behavior where
   fmap = bmap
@@ -319,9 +326,6 @@ bmap :: (a ->b ) -> Behavior a -> Behavior b
 bmap f ~(B l e) = B (Prim.mapL f l) e
 {-# NOINLINE [1] bmap #-}
 
-{-# RULES
-"bmap/bmap" forall f g xs . bmap f (bmap g xs) = bmap (f . g) xs
- #-}
 
 instance Applicative Behavior where
   pure = pureB

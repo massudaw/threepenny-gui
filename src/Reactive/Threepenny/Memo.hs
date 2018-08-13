@@ -30,14 +30,14 @@ at (Memoized r) = do
             a <- ma    -- allow some recursion
             return a
 
-memoize :: IO a -> IO (Memo a)
-memoize m = Memoized <$> newIORef (Left m)
+memoize :: IO a -> (Memo a)
+memoize m = unsafePerformIO $ Memoized <$> newIORef (Left m)
 
 liftMemo1 :: (a -> IO b) -> Memo a -> (Memo b)
-liftMemo1 f ma = unsafePerformIO $ memoize $ f =<< at ma
+liftMemo1 f ma = memoize $ f =<< at ma
 
 liftMemo2 :: (a -> b -> IO c) -> Memo a -> Memo b -> (Memo c)
-liftMemo2 f ma mb = unsafePerformIO $ memoize $ do
+liftMemo2 f ma mb = memoize $ do
     a <- at ma
     b <- at mb
     f a b
