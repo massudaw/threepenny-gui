@@ -206,20 +206,20 @@ addEventIO name fun el Window{ jsWindow = w, wAllEvents = wAllEvents} = do
               ClientEventFunction fun@(JSFunction _ m) -> do
                 v <- liftIO $ code fun
                 handlerPtr <- makePtr m
-                liftIO . JS.unsafeCreateJSObject w $
+                liftIO . JS.unsafeCreateJSObjectDelayed w el $
                   ffi "Haskell.bind(%1,%2,%3,%4)" el name (unJSCode v) handlerPtr
               SyncEventFunction fun@(JSFunction _ m)-> do
                 v <- liftIO $ code fun
                 handlerPtr <- makePtr m
-                liftIO . JS.unsafeCreateJSObject w $
+                liftIO . JS.unsafeCreateJSObjectDelayed w el $
                   ffi "Haskell.bind(%1,%2,'%3(' + %4 +')')" el name handlerPtr (unJSCode v)
               AsyncEventFunction fun -> mdo
                 let ~afun@(JSFunction _ m) = fun handlerPtr
                 handlerPtr <- makePtr m
                 v <- liftIO $ code afun
-                liftIO . JS.unsafeCreateJSObject w $
+                liftIO . JS.unsafeCreateJSObjectDelayed  w  el $
                   ffi "Haskell.bind(%1,%2,%3)" el name (unJSCode v)
-            E.registerDynamic $ JS.runFunction w $
+            E.registerDynamic $ JS.runFunctionDelayed w el $
               ffi "Haskell.unbind(%1,%2,%3)" el name bptr
 
 

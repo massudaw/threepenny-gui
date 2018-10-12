@@ -116,9 +116,12 @@ eventLoop init cookie comm = do
               b <- atomically $ readTVar (commOpen comm)
               when b (commClose comm)) v
 
-    let flushTimeout = forever $ do
-            i <- atomically $ flushDirtyBuffer comm w
-            threadDelay (i*1000)
+    let flushTimeout = getCurrentTime >>= go 
+          where
+            go  ti  =  do
+              (t,i) <- atomically $ flushDirtyBuffer ti comm w
+              threadDelay (i*1000)
+              go t
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             ref <- atomically $ do
@@ -185,19 +188,19 @@ fromJSStablePtr js w@(Window{..}) = do
         Nothing -> newJSPtr w coupon (JSPtr coupon) wJSObjects
 
 
-flushDirtyBuffer :: Comm -> Window -> STM Int
-flushDirtyBuffer comm w@Window{..} = do
-      (ti,tl,ix) <- takeTMVar wCallBufferStats
+flushDirtyBuffer :: UTCTime -> Comm -> Window -> STM (UTCTime,Int)
+flushDirtyBuffer tl comm w@Window{..} = do
+      (ti,ix) <- takeTMVar wCallBufferStats
       tc <- unsafeIOToSTM getCurrentTime
       let delta = round $ diffUTCTime tc tl *1000
           total = round $ diffUTCTime tl ti *1000
       if delta > flush_limit_min || total > flush_limit_max
         then do
           flushCallBufferSTM w
-          return flush_limit_min
+          return (tc,flush_limit_min)
         else do
-          putTMVar wCallBufferStats (ti,tl,ix)
-          return (flush_limit_min - delta)
+          putTMVar wCallBufferStats (ti,ix)
+          return (tl,flush_limit_min - delta)
 
 
 flush_limit_min :: Int

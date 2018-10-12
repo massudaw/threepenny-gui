@@ -397,7 +397,7 @@ sinkDiff attr bi mx = do
     liftIOLater $ do
         i <- currentValue (facts bi)
         dyn <- liftIO $ execDynamic $ runUI window $ set' attr i x
-        let bdiff = filterJust $ (\i j ->if i == j then Nothing else Just j ) <$> facts bi <@> rumors bi
+        let bdiff = filterJust $ (\i j -> if i == j then Nothing else Just j ) <$> facts bi <@> rumors bi
         bdiffnew <- stepper i bdiff
         Reactive.onChangeDynIni dyn   bdiffnew $ \i -> void $ runUI window $ set' attr i x
         return ()

@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns,RecordWildCards, RecursiveDo #-}
+{-# LANGUAGE TupleSections,RankNTypes,BangPatterns,RecordWildCards, RecursiveDo #-}
 module Reactive.Threepenny.PulseLatch (
     Pulse, newPulse, addHandler,
     neverP, mapP, filterJustP, unionWithP, unsafeMapIOP,dependOn,
@@ -12,6 +12,7 @@ module Reactive.Threepenny.PulseLatch (
 import Control.Applicative
 import Control.Monad
 import qualified Data.Foldable as F
+import Debug.Trace
 import Control.Monad.Trans.Class
 import Debug.Trace
 import Control.Monad.Trans.State as Monad
@@ -165,12 +166,18 @@ applyP l p = (`dependOn` p) <$> cacheEval eval
         a <- evalP p
         return $ f <$> a
 
+newLatch :: forall a . a -> Build ( Pulse a -> Handler, Latch a )
+newLatch a = do
+  cache' <- newIORef (0,a)
+  let l1 = Latch { height = 0 , cache = cache' , readL = snd <$> readIORef cache' }
+  let handler p2 = whenPulse p2 $ (\v ->atomicModifyIORef' cache' (\(i,j) -> ((i+1 ,v),())))
+  return (handler,l1)
+
 -- | Accumulate values in a latch.
 accumL :: a -> Pulse (a -> a) -> Build (Latch a, Pulse a,IO ())
 accumL a p1 = do
     -- IORef to hold the current latch value
-    latch <- newIORef a
-    let l1 = Latch { readL = readIORef latch }
+    (handler,l1) <- newLatch a
 
     -- calculate new pulse from old value
     let l2 = mapL (flip ($)) l1
@@ -178,21 +185,39 @@ accumL a p1 = do
 
     -- register handler to update latch
     uid <- newUnique
-    let handler = whenPulse p2 $ (writeIORef latch $!)
-    unH <- addHandlerP p2 ((uid, DoLatch), handler)
+    unH <- addHandlerP p2 ((uid, DoLatch), handler p2 )
 
     return (l1,p2,unH)
 
 -- | Latch whose value stays constant.
 pureL :: a -> Latch a
-pureL a = Latch { readL = return a }
+pureL a =unsafePerformIO $ do
+  ref <- newIORef (0,a)
+  return $ Latch { height = 0, cache = ref, readL = return a }
 
 -- | Map a function over latches.
 --
 -- Evaluated only when needed, result is not cached.
 mapL :: (a -> b) -> Latch a -> (Latch b)
-mapL f l =
-  Latch { readL = f <$> readL l }
+mapL f l = unsafePerformIO $ do
+  let h = height l + 1
+  timeRef <- newIORef (0 - h,error $ "mapL not evaluated with height: " ++ (show h))
+  let
+    go = do
+      i <-  readL l
+      sourceTime <- readIORef (cache l)
+      targetTime <- readIORef timeRef
+      -- print ("mapL",fst targetTime ,fst sourceTime ,h)
+      if fst targetTime >= fst sourceTime
+         then do
+           -- print ("mapL shared",fst sourceTime ,h)
+           return (snd targetTime)
+         else do
+           let !v = f i
+           -- print ("eval mapL",fst sourceTime ,h)
+           writeIORef timeRef $! (fst sourceTime , v)
+           return v
+  return $ Latch { height = h  , cache = timeRef , readL = go }
 
 {-# RULES
 "mapL/mapL" forall f g xs . mapL f (mapL g xs) = mapL (f . g) xs
@@ -210,11 +235,30 @@ mapL f l =
 readLatch :: Latch a -> Build a
 readLatch l = readL l
 
+
 -- | Apply two current latch values
 --
 -- Evaluated only when needed, result is not cached.
 applyL :: Latch (a -> b) -> Latch a -> Latch b
-applyL l1 l2 = Latch { readL = readL l1 <*> readL l2 }
+applyL l1 l2 = unsafePerformIO $ do
+  let h = ((height l1) + (height l2)) + 1
+  timeRef <- newIORef (0 - h,error $ "applyL not evaluated with height: " ++ (show h))
+  let
+    go = do
+      f <- readL l1
+      i <- readL l2
+      sourceTime1 <- readIORef (cache l1)
+      sourceTime2 <- readIORef (cache l2)
+      targetTime <- readIORef timeRef
+      if fst targetTime >= (fst sourceTime1 + fst sourceTime2)
+         then do
+            -- print "applyL shared"
+            return (snd targetTime)
+         else mdo
+            let ! v = f i
+            writeIORef timeRef $! ((fst sourceTime1 + fst sourceTime2)  , v)
+            return v
+  return $ Latch { height = h , cache = timeRef , readL = go }
 
 {-----------------------------------------------------------------------------
     Test
@@ -229,12 +273,13 @@ test = do
     void $ addHandler p3 print
     return fire
 
-test_recursion1 :: IO (IO ())
+test_recursion1 :: IO (Int -> IO ())
 test_recursion1 = mdo
     (p1, fire,_) <- newPulse
     p2      <- applyP l2 p1
-    p3      <- mapP (const (+1)) p2
+    p3      <- mapP (+) p2
     ~(l1,_,_) <- accumL (0::Int) p3
-    let l2  =  mapL const l1
-    void $ addHandler p2 print
-    return $ fire ()
+    let l2  =  mapL (traceShow "l2 sum" . (+)) l1
+    void $ addHandler p1 (print . ("p1",))
+    void $ addHandler p2 (print .("p2",))
+    return $ fire

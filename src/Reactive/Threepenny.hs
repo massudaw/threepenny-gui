@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns,RecursiveDo  #-}
+{-# LANGUAGE TupleSections,BangPatterns,RecursiveDo  #-}
 module Reactive.Threepenny (
     -- * Synopsis
     -- | Functional reactive programming.
@@ -47,8 +47,10 @@ module Reactive.Threepenny (
     onChange,onChangeDyn,onChangeDynIni, unsafeMapIO, newEventsNamed,mapEventIO,mapEventDyn,mapEventDynInterrupt,mapTidingsDyn0,mapTidingsDyn,mapTidingsDynInterrupt0,mapTidingsDynInterrupt,onEventDyn,onEventDynInterrupt
     ) where
 
+import Debug.Trace
 import Control.Applicative
 import Control.Concurrent
+import System.Mem
 import Control.Monad (void,(>=>))
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -306,9 +308,6 @@ accumE :: a -> Event (a -> a) -> Dynamic (Event a)
 accumE a e = do
   (_,p,unH) <-  liftIO $ Prim.accumL a =<< at (unE e)
   registerDynamic unH
-
-
-
   return $ E $ fromPure p
 
 accumT :: a -> Event (a -> a) -> Dynamic (Tidings a)
@@ -449,7 +448,7 @@ onEventDynInterrupt  e f =  mdo
       forkIO (do
           pid <- myThreadId
           (i,s) <- runDynamic (f i)
-          hfin (killThread pid:s)))
+          hfin ([sequence s >> killThread pid])))
   bfin <- stepper [] efin
   registerDynamic $ sequence_ =<< currentValue bfin
   return ()
@@ -575,8 +574,9 @@ mapTidingsDynInterrupt0 i f e = mdo
         sequence_ fin
         forkIO (do
             pid <- myThreadId
+            putStrLn $ "Start thread" ++ show pid
             (i,s) <- runDynamic (f i)
-            hfin (i,killThread pid:s)))
+            hfin (i,[sequence s >> (putStrLn $ "Stop thread" ++ show pid) >> killThread pid >> performMinorGC ])))
   bfin <- stepperT ini efin
   registerDynamic $ sequence_ =<< currentValue (snd <$> facts bfin)
   return (fst <$> bfin)
@@ -606,9 +606,13 @@ test_recursion1 :: Dynamic ()
 test_recursion1 = mdo
     (e1, fire) <- newEvent
     let e2 :: Event Int
-        e2 = apply (const <$> b) e1
-    b  <- accumB 0 $ (+1) <$ e2
-    register e2 print
+        e2 = apply ((\i -> traceShow ("work",i ()) i)  <$> (const . snd <$> facts b)) e1
+    b  <-  fmap (fmap ("t",)) <$> accumT 0 $ (+1) <$ e2
+    let b2 = traceShowId . ("a",)<$> b
+
+    onChange (facts b) (print . ("onChange",))
+    onChange (facts b2) (print . ("onChange2",))
+    register (e2 ) print
     liftIO $ fire ()
     liftIO $ fire ()
     liftIO $ fire ()

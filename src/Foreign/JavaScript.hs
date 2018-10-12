@@ -18,7 +18,7 @@ module Foreign.JavaScript (
     -- * JavaScript FFI
     JavaScriptException(..),JSCode(..),ToJS(..), FromJS, JSFunction(..),emptyFunction, JSObject,toCode,
     FFI, ffi, runFunction, runFunctionDelayed, callFunction,
-    NewJSObject, unsafeCreateJSObject,
+    NewJSObject, unsafeCreateJSObject,unsafeCreateJSObjectDelayed,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer, flushChildren, forceObject,
     IsHandler, exportHandler, onDisconnect,
     debug, timestamp,addFinalizer
@@ -86,11 +86,18 @@ runFunctionDelayed w js f = bufferRunEvalMethod w js =<< toCode f
 --
 -- WARNING: This function assumes that the supplied JavaScript code does,
 -- in fact, create an object that is new.
+unsafeCreateJSObjectDelayed :: Window -> JSObject -> JSFunction NewJSObject -> IO JSObject
+unsafeCreateJSObjectDelayed w obj f = do
+    g <- wrapImposeStablePtr w f
+    bufferRunEvalMethod w obj =<< toCode g
+    marshalResult g w JSON.Null
+
 unsafeCreateJSObject :: Window -> JSFunction NewJSObject -> IO JSObject
 unsafeCreateJSObject w f = do
     g <- wrapImposeStablePtr w f
     atomically . bufferRunEval w =<< toCode g
     marshalResult g w JSON.Null
+
 
 -- | Call a JavaScript function and wait for the result.
 callFunction :: Window -> JSFunction a -> IO a

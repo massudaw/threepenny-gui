@@ -229,7 +229,7 @@ data Window = Window
     , wCallBuffer     :: TVar CallBuffer
     , wCallBufferMap  :: TVar (Set Coupon , BufferMap Coupon (TVar CallBuffer))
     , wCallBufferMode :: TVar CallBufferMode
-    , wCallBufferStats :: TMVar (UTCTime,UTCTime,Int)
+    , wCallBufferStats :: TMVar (UTCTime,Int)
 
     , timestamp      :: IO ()
     -- ^ Print a timestamp and the time difference to the previous one

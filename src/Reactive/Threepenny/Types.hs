@@ -6,6 +6,7 @@ import Data.Functor.Identity ()
 import           Data.Hashable
 import qualified Data.Vault.Strict   as Vault.Strict
 import           Data.Unique.Really
+import           Data.IORef
 
 {-----------------------------------------------------------------------------
     Pulse and Latch
@@ -22,7 +23,7 @@ data Pulse a = Pulse
 
 instance Hashable Priority where hashWithSalt _ = fromEnum
 
-data Latch a = Latch { readL :: EvalL a }
+data Latch a = Latch { height :: Int , cache :: IORef (Int ,a) , readL :: EvalL a }
 
 {-----------------------------------------------------------------------------
     Monads
