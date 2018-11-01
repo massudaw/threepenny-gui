@@ -50,7 +50,6 @@ module Reactive.Threepenny (
 import Debug.Trace
 import Control.Applicative
 import Control.Concurrent
-import System.Mem
 import Control.Monad (void,(>=>))
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -576,7 +575,7 @@ mapTidingsDynInterrupt0 i f e = mdo
             pid <- myThreadId
             putStrLn $ "Start thread" ++ show pid
             (i,s) <- runDynamic (f i)
-            hfin (i,[sequence s >> (putStrLn $ "Stop thread" ++ show pid) >> killThread pid >> performMinorGC ])))
+            hfin (i,[sequence s >> (putStrLn $ "Stop thread" ++ show pid) >> killThread pid ])))
   bfin <- stepperT ini efin
   registerDynamic $ sequence_ =<< currentValue (snd <$> facts bfin)
   return (fst <$> bfin)
