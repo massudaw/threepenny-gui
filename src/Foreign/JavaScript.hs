@@ -17,7 +17,7 @@ module Foreign.JavaScript (
 
     -- * JavaScript FFI
     JavaScriptException(..),JSCode(..),ToJS(..), FromJS, JSFunction(..),emptyFunction, JSObject,toCode,
-    FFI, ffi, runFunction, runFunctionDelayed, callFunction,
+    FFI, ffi, runFunction, runFunctionDelayed, callFunction,toCode,
     NewJSObject, unsafeCreateJSObject,unsafeCreateJSObjectDelayed,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer, flushChildren, forceObject,
     IsHandler, exportHandler, onDisconnect,

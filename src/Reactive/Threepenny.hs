@@ -44,7 +44,7 @@ module Reactive.Threepenny (
     -- * Internal
     -- | Functions reserved for special circumstances.
     -- Do not use unless you know what you're doing.
-    onChange,onChangeDyn,onChangeDynIni, unsafeMapIO, newEventsNamed,mapEventIO,mapEventDyn,mapEventDynInterrupt,mapTidingsDyn0,mapTidingsDyn,mapTidingsDynInterrupt0,mapTidingsDynInterrupt,onEventDyn,onEventDynInterrupt
+    onChange,onChangeDyn,onChangeDynIni, unsafeMapIO, newEventsNamed,mapEventIO,mapEventDyn,mapEventDynInterrupt,mapTidingsDyn0,mapTidingsDyn,mapTidingsDynInterrupt0,mapTidingsDynInterrupt,onEventDyn,onEventDynIni,onEventDynInterrupt
     ) where
 
 import Debug.Trace
@@ -186,15 +186,19 @@ onChangeDynIni ini (B l e ) hf = mdo
     return ()
 
 
+
 onChangeDyn :: Behavior a -> (a -> Dynamic ()) -> Dynamic ()
-onChangeDyn (B  l e ) hf = mdo
+onChangeDyn b@(B  l e ) hf = mdo
     inil <- liftIO (Prim.readLatch l)
     v <- liftIO $ unsafeInterleaveIO $ execDynamic $ hf  inil
+    onChangeDynIni v b hf
+    {-
     (ev,h) <-newEvent
     register ((,) <$> bv <@> e) (\(~(fin,i))-> sequence_ fin >> Prim.readLatch l >>= (execDynamic . hf   >=> h))
     bv <- stepper v ev
     registerDynamic (currentValue bv >>= sequence_)
     return ()
+    -}
 
 
 -- | Read the current value of a 'Behavior'.
@@ -436,6 +440,17 @@ onEventDyn  e f =  mdo
   bfin <- stepper [] efin
   registerDynamic $ ((sequence_ =<< currentValue bfin) )
   return ()
+
+onEventDynIni
+  :: [IO ()] -> Event a ->  (a -> Dynamic b) -> Dynamic ()
+onEventDynIni  ini e f =  mdo
+  (efin,hfin) <- newEvent
+  onEventIO ((,) <$> bfin <@>e ) (\ ~(fin,i) -> sequence_ fin >> (hfin  .snd =<< (runDynamic (f i) )) )
+  bfin <- stepper ini efin
+  registerDynamic $ ((sequence_ =<< currentValue bfin) )
+  return ()
+
+
 
 onEventDynInterrupt
   :: Event a ->  (a -> Dynamic b) -> Dynamic ()

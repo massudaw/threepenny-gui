@@ -15,6 +15,7 @@ jsDriverCode dict = Text.unlines $ map Text.pack
     , $(include "js/ffi.js")
     , $(include "js/lib.js")
     , $(include "js/log.js")
+    , $(include "js/fast-json-patch.js")
     ]
 
 cssDriverCode :: Text

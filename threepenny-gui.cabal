@@ -88,6 +88,7 @@ Library
                     ,Graphics.UI.Threepenny.Timer
                     ,Graphics.UI.Threepenny.Widgets
                     ,Reactive.Threepenny
+                    ,Reactive.Threepenny.PStream
   other-modules:
                      Foreign.JavaScript.EventLoop
                     ,Foreign.JavaScript.CallBuffer
@@ -105,6 +106,7 @@ Library
   if flag(rebug)
       cpp-options:  -DREBUG
   build-depends:     base                   >= 4.6   && < 4.11
+                    ,patch
                     ,time
                     ,aeson                  (>= 0.7 && < 0.10) || == 0.11.* || (>= 1.0 && < 1.4)
                     ,async                  >= 2.0   && < 2.2

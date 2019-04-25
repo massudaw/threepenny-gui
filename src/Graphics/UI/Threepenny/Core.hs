@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts,ScopedTypeVariables,TypeSynonymInstances,RankNTypes,FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies,FlexibleContexts,ScopedTypeVariables,TypeSynonymInstances,RankNTypes,FlexibleContexts #-}
 module Graphics.UI.Threepenny.Core (
     -- * Synopsis
     -- | Core functionality of the Threepenny GUI library.
@@ -37,8 +37,8 @@ module Graphics.UI.Threepenny.Core (
     -- * Attributes
     -- | For a list of predefined attributes, see "Graphics.UI.Threepenny.Attributes".
     (#), (#.),
-    Attr, WriteAttr, ReadAttr, ReadWriteAttr(..),ReadWriteAttrMIO(..),
-    set, sink,sinkE,sinkDiff, get, mkReadWriteAttr, mkWriteAttr, mkReadAttr,
+    Attr, WriteAttr, ReadAttr, ReadWriteAttr(..),ReadWriteAttrMIO(..),ReadWriteModifyAttrMIO(..),
+    set, modify,sink,sinkE,sinkDelta,sinkDiff, get, mkReadWriteAttr, mkWriteAttr, mkReadAttr,
     bimapAttr, fromObjectProperty,
 
     -- * Widgets
@@ -48,7 +48,7 @@ module Graphics.UI.Threepenny.Core (
     -- | Direct interface to JavaScript in the browser window.
     debug, timestamp,
     ToJS(..), FromJS(..),JS.JSCode(..),FFI,
-    JSFunction, ffi,event, runFunction, runFunctionDelayed, callFunction,ffiAttr,ffiAttrRead,ffiAttrWrite,ffiAttrCall,JS.emptyFunction,
+    JSFunction, ffi,event, runFunction, runFunctionDelayed, callFunction,ffiAttr,ffiAttrDelta,ffiAttrRead,ffiAttrWrite,ffiAttrCall,JS.emptyFunction,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
     ffiExport,
 
@@ -66,8 +66,10 @@ import Data.Functor.Identity
 import qualified Control.Monad.Catch             as E
 import qualified Data.Aeson                      as JSON
 import qualified Foreign.JavaScript              as JS
+import Patch
 import qualified Graphics.UI.Threepenny.Internal as Core
 import qualified Reactive.Threepenny             as Reactive
+import qualified Reactive.Threepenny.PStream     as Reactive
 
 -- exports
 import Foreign.JavaScript                   (Config(..), defaultConfig)
@@ -109,10 +111,15 @@ title = mkWriteAttr $ \s _ ->
     mapM_ (Core.appendChild x) ys
     return x
 
+
 -- | Child elements of a given element.
-children :: WriteAttr Element [Element]
-children = mkWriteAttr set
+children :: WriteModifyAttr Element [Element] ([(Int,Element) ],[(Int,Element)])
+children = mkWriteModifyAttr set modify
     where
+    modify (xs,d) i = do 
+        mapM_ (Core.appendChild i.snd) xs 
+        mapM_ (Core.removeChild i.snd) d 
+        
     set xs x = do
         Core.clearChildren x
         mapM_ (Core.appendChild x) xs
@@ -121,8 +128,8 @@ addChild :: WriteAttr Element Element
 addChild = mkWriteAttr set
     where
     set xs x = do
-        Core.appendChild x xs
         w <- askWindow
+        Core.appendChild x xs
         ui $ registerDynamic $ void $ runDynamic $ runUI w $  Core.removeChild x xs
 
 
@@ -337,49 +344,64 @@ type ReadAttr x o = ReadWriteAttr x () o
 
 -- | Attribute that only supports the 'set' operation.
 type WriteAttr x i = ReadWriteAttr x i ()
+type WriteModifyAttr x i d = ReadWriteModifyAttrMIO UI  x i d ()
 
 -- | Generalized attribute with different types for getting and setting.
 
 type ReadWriteAttr x i o  = ReadWriteAttrMIO UI x i o
 
-data ReadWriteAttrMIO m x i o = ReadWriteAttr
+type ReadWriteAttrMIO m x i o = ReadWriteModifyAttrMIO m x i () o 
+data ReadWriteModifyAttrMIO m x i d o = ReadWriteAttr
   { get' :: x -> m o
   , set' :: i -> x -> m ()
+  , modify' :: d -> x -> m ()
   }
 
+ffiAttrDelta :: (FromJS b,ToJS x ,ToJS a ,ToJS d )=> String -> String -> String -> ReadWriteModifyAttrMIO JSFunction x a d b
+ffiAttrDelta get set mod = ReadWriteAttr (\x  -> ffi get x ) (\x y -> ffi set  x y)  (\x y -> ffi mod x y)
+
 ffiAttr :: (FromJS b,ToJS x ,ToJS a )=> String -> String -> ReadWriteAttrMIO JSFunction x a b
-ffiAttr get set = ReadWriteAttr (\x  -> ffi get x ) (\x y -> ffi set  x y)
+ffiAttr get set = ReadWriteAttr (\x  -> ffi get x ) (\x y -> ffi set  x y)  (\x y -> ffi set  x y) 
 
 ffiAttrRead :: (FromJS b,ToJS x )=> String -> ReadWriteAttrMIO JSFunction x () b
-ffiAttrRead get = ReadWriteAttr (\x  -> ffi get x ) (\x y -> JS.emptyFunction )
+ffiAttrRead get = ReadWriteAttr (\x  -> ffi get x ) (\x y -> JS.emptyFunction )(\x y -> JS.emptyFunction )
 
 ffiAttrWrite :: (ToJS x ,ToJS a )=> String -> ReadWriteAttrMIO JSFunction x a ()
-ffiAttrWrite set = ReadWriteAttr (\_ -> JS.emptyFunction) (\x y -> ffi set  x y)
+ffiAttrWrite set = ReadWriteAttr (\_ -> JS.emptyFunction) (\x y -> ffi set  x y) (\x y -> ffi set  x y)
 
-ffiAttrCall :: (FromJS b,ToJS x ,ToJS a )=> ReadWriteAttrMIO JSFunction x a b -> ReadWriteAttrMIO UI x a b
-ffiAttrCall (ReadWriteAttr get set ) = ReadWriteAttr (\x -> callFunction $ get x) (\i x -> runFunction $ set i x)
 
-instance MonadIO m => Functor (ReadWriteAttrMIO m x i) where
-    fmap f = bimapAttr id f
+ffiAttrCall :: (FromJS b,ToJS x ,ToJS a,ToJS d )=> ReadWriteModifyAttrMIO JSFunction x a b d -> ReadWriteModifyAttrMIO UI x a b d
+ffiAttrCall (ReadWriteAttr get set mod ) = ReadWriteAttr (\x -> callFunction $ get x) (\i x -> runFunction $ set i x) (\i x -> runFunction $ mod i x)
+
+instance MonadIO m => Functor (ReadWriteModifyAttrMIO m x i d) where
+    fmap f = bimapAttr id id f
 
 -- | Map input and output type of an attribute.
-bimapAttr :: Functor m => (i' -> i) -> (o -> o')
-          -> ReadWriteAttrMIO m x i o -> ReadWriteAttrMIO m x i' o'
-bimapAttr from to attr = attr
+bimapAttr :: Functor m => (i' -> i)  -> (d' -> d) -> (o -> o')
+          -> ReadWriteModifyAttrMIO m x i d o -> ReadWriteModifyAttrMIO m x i' d' o'
+bimapAttr from delta to attr = attr
     { get' = fmap to . get' attr
     , set' = \i' -> set' attr (from i')
+    , modify' = \i' -> modify' attr (delta i')
     }
 
 -- | Set value of an attribute in the 'UI' monad.
 -- Best used in conjunction with '#'.
-set :: Monad m => ReadWriteAttrMIO m x i o -> i -> m x -> m x
+set :: Monad m => ReadWriteModifyAttrMIO m x i d o -> i -> m x -> m x
 set attr i mx = do { x <- mx; set' attr i x; return x; }
+
+-- | Set value of an attribute in the 'UI' monad.
+-- Best used in conjunction with '#'.
+modify :: Monad m => ReadWriteModifyAttrMIO m x i d o -> d -> m x -> m x
+modify attr i mx = do { x <- mx; modify' attr i x; return x; }
+
+
 
 -- | Set the value of an attribute to a 'Behavior', that is a time-varying value.
 --
 -- Note: For reasons of efficiency, the attribute is only
 -- updated when the value changes.
-sink :: ReadWriteAttr x i o -> Behavior i -> UI x -> UI x
+sink :: ReadWriteModifyAttrMIO UI x i d o -> Behavior i -> UI x -> UI x
 sink attr bi mx = do
     x <- mx
     window <- askWindow
@@ -387,6 +409,17 @@ sink attr bi mx = do
         i <- currentValue bi
         dyn <- liftIO $ execDynamic $ runUI window $ set' attr i x
         Reactive.onChangeDynIni dyn  bi  $ \i -> void $ runUI window $ set' attr i x
+        return ()
+    return x
+
+sinkDelta :: ToJS i => ReadWriteModifyAttrMIO UI x i (Index i) l -> Reactive.PStream i ->  UI x -> UI x
+sinkDelta attr (Reactive.PStream bi e) mx = do
+    x <- mx
+    window <- askWindow
+    liftIOLater $ do
+        i <- currentValue bi
+        dyn <- liftIO $ execDynamic $ runUI window $  set' attr i x
+        Reactive.onEventDynIni dyn e $ \i -> void $ runUI window $ modify' attr i x
         return ()
     return x
 
@@ -429,10 +462,19 @@ get attr = get' attr
 
 -- | Build an attribute from a getter and a setter.
 mkReadWriteAttr
-  :: (x -> m o)          -- ^ Getter.
+  :: Applicative m 
+    => (x -> m o)          -- ^ Getter.
     -> (i -> x -> m ())    -- ^ Setter.
     -> ReadWriteAttrMIO m  x i o
-mkReadWriteAttr get set = ReadWriteAttr { get' = get, set' = set }
+mkReadWriteAttr get set = ReadWriteAttr { get' = get, set' = set ,modify' = (\ _ _ -> pure () ) }
+
+mkReadWriteModifyAttr
+  :: (x -> m o)          -- ^ Getter.
+    -> (i -> x -> m ())    -- ^ Setter.
+    -> (d -> x -> m ())    -- ^ Modify.
+    -> ReadWriteModifyAttrMIO m x i d o
+mkReadWriteModifyAttr get set modify = ReadWriteAttr { get' = get, set' = set ,modify' = modify}
+
 
 -- | Build attribute from a getter.
 mkReadAttr :: (x -> UI o) -> ReadAttr x o
@@ -440,7 +482,12 @@ mkReadAttr get = mkReadWriteAttr get (\_ _ -> return ())
 
 -- | Build attribute from a setter.
 mkWriteAttr :: (i -> x -> UI ()) -> WriteAttr x i
-mkWriteAttr set = mkReadWriteAttr (\_ -> return ()) set
+mkWriteAttr set = mkReadWriteAttr (\_ -> return ()) set 
+
+-- | Build attribute from a setter.
+mkWriteModifyAttr :: (i -> x -> UI ()) -> (d -> x -> UI ()) ->  WriteModifyAttr x i d
+mkWriteModifyAttr set modify = mkReadWriteModifyAttr (\_ -> return ()) set  modify
+
 
 -- | Turn a jQuery property @.prop()@ into an attribute.
 fromJQueryProp :: String -> (JSON.Value -> a) -> (a -> JSON.Value) -> Attr Element a

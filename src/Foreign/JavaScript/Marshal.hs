@@ -185,11 +185,12 @@ instance (ToJS a, FFI b) => FFI (a -> b) where
 
 
 instance FromJS b        => FFI (JSFunction b) where
-    fancy f   = JSFunction
+    fancy f = JSFunction
         { code          = wrapCode b <$> f []
         , marshalResult = marshal b
         }
-        where b = fromJS
+        where 
+          b = fromJS
 
 -- | Simple JavaScript FFI with string substitution.
 --

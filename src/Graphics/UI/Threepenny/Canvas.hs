@@ -180,7 +180,7 @@ sToA algn =
 
 -- | The alignment for 'fillText' and 'strokeText'. Default is 'Start'.
 textAlign :: Attr Canvas TextAlign
-textAlign = bimapAttr aToS sToA $ textAlignStr
+textAlign = bimapAttr aToS id sToA $ textAlignStr
     where
     textAlignStr :: Attr Canvas String
     textAlignStr = fromObjectProperty "getContext('2d').textAlign"
