@@ -67,7 +67,7 @@ data Window = Window
     , eDisconnect :: E.Event () -- event that happens when client disconnects
     , wEvents     :: Foreign.Vendor Events
                      -- events associated to 'Element's
-    , wAllEvents  :: Foreign.Vendor (Wrap E.Event )
+    , wAllEvents  :: Foreign.Vendor (Wrap E.Event)
                      -- events associated to 'Element's
     , wChildren   :: Foreign.Vendor ()
                      -- children reachable from 'Element's
@@ -410,7 +410,16 @@ in which JavaScript function calls are executed.
 * Recursion for functional reactive programming.
 
 -}
-newtype UI a = UI { unUI :: Monad.RWST Window [Dynamic ()] () Dynamic a }
+newtype Finalizer = Finalizer (Dynamic ()) 
+
+instance Semigroup Finalizer where 
+  Finalizer i <> Finalizer j =  Finalizer $ i >> j 
+
+instance Monoid Finalizer where
+  mempty = Finalizer $ return ()
+
+
+newtype UI a = UI { unUI :: Monad.RWST Window Finalizer () Dynamic a }
     deriving (Typeable)
 
 
@@ -447,8 +456,8 @@ instance MonadCatch UI where
 -- Also runs all scheduled 'IO' actions.
 runUI :: Window -> UI a -> Dynamic a
 runUI window m = do
-  (a,_,actions) <- Monad.runRWST (unUI m) window ()
-  sequence_ actions
+  (a,_,Finalizer actions) <- Monad.runRWST (unUI m) window ()
+  actions
   return a
 
 ui f = UI $ lift f
@@ -459,7 +468,7 @@ askWindow = UI Monad.ask
 
 -- | Schedule an 'IO' action to be run later.
 liftIOLater :: Dynamic () -> UI ()
-liftIOLater x = UI $ Monad.tell [x]
+liftIOLater x = UI $ Monad.tell (Finalizer x)
 
 
 {-----------------------------------------------------------------------------

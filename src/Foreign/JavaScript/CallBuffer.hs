@@ -170,7 +170,7 @@ bufferRunEval' w@Window{..} icode = do
       let buffer = do
               modifyTVar wCallBuffer (appendBuffer icode)
               t0 <- unsafeIOToSTM getCurrentTime
-              tryModifyTMVar wCallBufferStats (maybe (t0,t0,1) (\(ti,tf,i) -> (ti,t0,i+1)))
+              modifyTVar wCallBufferStats (\(ti,tf,i) -> (ti,t0,i+1))
               return Nothing
       o <- case mode of
             BufferAll ->  buffer

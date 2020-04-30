@@ -83,10 +83,10 @@ type Store v = Map.IntMap v
 type RemotePtr a = IORef (RemoteData a)
 
 data RemoteData a = RemoteData
-    { self     :: Weak (RemotePtr a)
-    , coupon   :: Coupon
+    { self     ::  (Weak (RemotePtr a))
+    , coupon   :: {-# UNPACK #-} ! Coupon
     , value    :: a
-    , children :: IORef (Store SomeWeak)
+    , children :: {-# UNPACK #-} ! (IORef (Store SomeWeak))
     }
 
 -- Existentially quantified weak pointer. We only care about its finalizer.
@@ -212,6 +212,7 @@ removeReachable parent child = do
     ref <- children <$> readIORef parent
     xs  <- atomicModifyIORef' ref $ \xs -> (Map.delete ix xs, xs)
     sequence_ [finalize x | SomeWeak x <- Map.elems xs]
+
 clearReachable :: RemotePtr a -> IO ()
 clearReachable parent = do
     ref <- children <$> readIORef parent

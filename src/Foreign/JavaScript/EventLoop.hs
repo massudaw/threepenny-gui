@@ -186,7 +186,7 @@ fromJSStablePtr js w@(Window{..}) = do
 
 flushDirtyBuffer :: Comm -> Window -> STM Int
 flushDirtyBuffer comm w@Window{..} = do
-      (ti,tl,ix) <- takeTMVar wCallBufferStats
+      (ti,tl,ix) <- readTVar wCallBufferStats
       tc <- unsafeIOToSTM getCurrentTime
       let delta = round $ diffUTCTime tc tl *1000
           total = round $ diffUTCTime tl ti *1000
@@ -195,7 +195,7 @@ flushDirtyBuffer comm w@Window{..} = do
           flushCallBufferSTM w
           return flush_limit_min
         else do
-          putTMVar wCallBufferStats (ti,tl,ix)
+          writeTVar wCallBufferStats (ti,tl,ix)
           return (flush_limit_min - delta)
 
 
