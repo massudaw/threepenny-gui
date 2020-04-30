@@ -42,7 +42,7 @@ Haskell.bind = function (el, eventType, code,fun) {
     return handlers[eventType](el,eventType,fun);
   } else {
     var bf = function(event) {
-      eval(code);
+      fun(eval(code));
       return true;
     }
     $(el).bind(eventType, bf);

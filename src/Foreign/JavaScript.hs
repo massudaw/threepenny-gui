@@ -54,7 +54,7 @@ serve
     -> IO ()
 serve config init = httpComm config $ eventLoop $ \w -> do
   init w
-  flushCallBuffer w   -- make sure that all `runEval` commands are executed
+  -- flushCallBuffer w   -- make sure that all `runEval` commands are executed
   return ()
 
 {-----------------------------------------------------------------------------
@@ -117,7 +117,7 @@ callFunction w f = do
 -- keep it alive.
 exportHandler :: IsHandler a => Window -> a -> IO JSObject
 exportHandler w f = do
-    g <- newHandler w (\args -> handle f w args >> flushCallBuffer w)
+    g <- newHandler w (\args -> handle f w args )
     h <- unsafeCreateJSObject w $
         ffi "Haskell.newEvent(%1,%2)" g (convertArguments f)
     Foreign.addReachable h g

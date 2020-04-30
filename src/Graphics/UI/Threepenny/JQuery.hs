@@ -33,7 +33,7 @@ fadeOut el duration easing complete = do
 -- | The 'sendValue' event happens whenever the return key is pressed
 -- while the element has focus. Its data is the event value.
 sendValue :: Element -> UI (Event String)
-sendValue el = fmap unsafeFromJSON <$> domEventH "sendvalue" el (ffi "")
+sendValue el = fmap unsafeFromJSON <$> domEventClient "sendvalue" el (ffi "")
 
 -- | Focus an element.
 setFocus :: Element -> UI ()

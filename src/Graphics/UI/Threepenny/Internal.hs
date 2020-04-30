@@ -189,7 +189,6 @@ fromJSObject el = do
 data EventFunction a
   = AsyncEventFunction (JS.JSObject -> JSFunction a)
   | SyncEventFunction  (JSFunction a)
-  | ClientEventFunction  (JSFunction a)
 
 addEventIO :: String -> EventFunction a -> JS.JSObject -> Window -> Dynamic (E.Event a)
 addEventIO name fun el Window{ jsWindow = w, wAllEvents = wAllEvents} = do
@@ -203,16 +202,11 @@ addEventIO name fun el Window{ jsWindow = w, wAllEvents = wAllEvents} = do
                   E.registerDynamic (Foreign.destroy handlerPtr)
                   return handlerPtr
             bptr <- case fun of
-              ClientEventFunction fun@(JSFunction _ m) -> do
-                v <- liftIO $ code fun
-                handlerPtr <- makePtr m
-                liftIO . JS.unsafeCreateJSObject w $
-                  ffi "Haskell.bind(%1,%2,%3,%4)" el name (unJSCode v) handlerPtr
               SyncEventFunction fun@(JSFunction _ m)-> do
                 v <- liftIO $ code fun
                 handlerPtr <- makePtr m
                 liftIO . JS.unsafeCreateJSObject w $
-                  ffi "Haskell.bind(%1,%2,'%3(' + %4 +')')" el name handlerPtr (unJSCode v)
+                  ffi "Haskell.bind(%1,%2,%3,%4)" el name (unJSCode v) handlerPtr 
               AsyncEventFunction fun -> mdo
                 let ~afun@(JSFunction _ m) = fun handlerPtr
                 handlerPtr <- makePtr m
@@ -310,7 +304,7 @@ domEventH name el fun = do
 
 domEventClient name el fun= do
   w <- liftIO $getWindow el
-  ui $ addEventIO name (ClientEventFunction fun) (toJSObject el) w
+  ui $ addEventIO name (SyncEventFunction fun) (toJSObject el) w
 
 domEventAsync
     :: String

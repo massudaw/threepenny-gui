@@ -22,12 +22,13 @@ import GHC.Conc
     Call Buffer
 ------------------------------------------------------------------------------}
 flushCallBuffer :: Window -> IO ()
-flushCallBuffer = atomically . flushCallBufferSTM
+flushCallBuffer w = do 
+  putStrLn "Forcing buffer flush"
+  atomically . flushCallBufferSTM $ w
 
 -- | Set the call buffering mode for the given browser window.
 setCallBufferMode :: Window -> CallBufferMode -> IO ()
 setCallBufferMode w@Window{..} new = atomically $ do
-    flushCallBufferSTM w
     writeTVar wCallBufferMode new
 
 -- | Flush the call buffer,

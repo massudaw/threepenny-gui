@@ -31,8 +31,9 @@ type Message = (UTCTime, String, String)
 setup :: Chan Message -> Window -> UI ()
 setup globalMsgs window = do
     msgs <- liftIO $ Chan.dupChan globalMsgs
+    setCallBufferMode  BufferAll
 
-    return window # set title "Chat"
+    -- return window # set title "Chat"
 
     (nickRef, nickname) <- mkNickname
     messageArea         <- mkMessageArea msgs nickRef
@@ -61,7 +62,6 @@ receiveMessages w msgs messageArea = do
         execDynamic $ runUI w $ do
           element messageArea #+ [mkMessage msg]
           UI.scrollToBottom messageArea
-          flushCallBuffer -- make sure that JavaScript functions are executed
 
 mkMessageArea :: Chan Message -> IORef String -> UI Element
 mkMessageArea msgs nickname = do
@@ -89,8 +89,8 @@ mkNickname = do
     UI.setFocus input
 
     nick <- liftIO $ newIORef ""
-    ku <- UI.keyup input
-    onEvent ku $ \_ -> liftIO . writeIORef nick . trim =<< get value input
+    ku <- UI.onChangeE input
+    onEvent ku $ \i -> liftIO . writeIORef nick . trim $ i
     return (nick,el)
 
 mkMessage :: Message -> UI Element
