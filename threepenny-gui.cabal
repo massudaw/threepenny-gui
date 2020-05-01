@@ -209,3 +209,14 @@ Executable threepenny-examples-svg
         buildable: False
     main-is:           Svg.hs
     hs-source-dirs:    samples
+
+Executable threepenny-examples-testspeed
+    if flag(buildExamples)
+        cpp-options:       -DCABAL
+        build-depends:     base                      >= 4     && < 5
+                          ,threepenny-gui
+                          , safe
+    else
+        buildable: False
+    main-is:           TestSpeed.hs
+    hs-source-dirs:    samples

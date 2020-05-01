@@ -61,8 +61,7 @@ withPreventGC f = do
 ------------------------------------------------------------------------------}
 type Element = JSObject
 
--- | Create a new element of the given tag name.
-newElement :: String -> Window -> IO Element
+-- | Create a new element of the given tag name. newElement :: String -> Window -> IO Element
 newElement tag w = callFunction w $
     ffi "document.createElement(%1)" tag
 

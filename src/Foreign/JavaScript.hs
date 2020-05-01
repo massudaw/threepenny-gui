@@ -59,8 +59,6 @@ serve
     -> IO ()
 serve config init = httpComm config $ eventLoop $ \w -> do
   setCallBufferMode w (jsCallBufferMode config)
-  runFunction w $
-        ffi "connection.setReloadOnDisconnect(%1)" $ jsWindowReloadOnDisconnect config
   init w
   return ()
 

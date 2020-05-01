@@ -309,7 +309,7 @@ data Window = Window
     , wCallBuffer     :: TVar CallBuffer
     , wCallBufferMap  :: TVar (Set , BufferMap (TVar CallBuffer))
     , wCallBufferMode :: TVar CallBufferMode
-    , wCallBufferStats :: TVar (Word64,Word64,Int)
+    , wCallBufferStats :: TVar (Maybe (Word64,Word64,Int))
     , timestamp      :: IO ()
     -- ^ Print a timestamp and the time difference to the previous one
     -- in the JavaScript console.
@@ -325,12 +325,11 @@ data Window = Window
 
 newPartialWindow :: IO Window
 newPartialWindow = do
-    t0 <- getMonotonicTimeNSec 
     ptr <- newRemotePtr (-1) () =<< newVendor
     b1  <- newTVarIO id
     b1i  <- newTVarIO (Set.empty ,[])
-    b2  <- newTVarIO BufferRun
-    b3  <- newTVarIO (t0,t0,0)
+    b2  <- newTVarIO BufferAll
+    b3  <- newTVarIO Nothing 
     let
       nop :: Monad m => b -> m ()
       nop = const $ return ()

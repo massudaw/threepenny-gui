@@ -191,31 +191,31 @@ fromJSStablePtr js w@(Window{..}) = do
 flushBuffers :: Window -> IO () 
 flushBuffers w = forever $ do
     i <- atomically $ flushDirtyBuffer w 
-    threadDelay (fromIntegral i + 1)
+    threadDelay (fromIntegral i `div` 1000) 
 
 flushDirtyBuffer ::  Window -> STM Word64
 flushDirtyBuffer w@Window{..} = do
-      (ti,tl,ix) <- readTVar wCallBufferStats
-      if ix == 0 
-        then retry 
-        else  do
+      stats <- readTVar wCallBufferStats
+      case stats of 
+        Nothing -> retry 
+        Just (ti,tl,ix) -> do
           tc  <- unsafeIOToSTM getMonotonicTimeNSec 
           let delta = tc - tl
               total = tl - ti 
           if delta > flushLimitMin || total > flushLimitMax 
             then do
               flushCallBufferSTM w
-              writeTVar wCallBufferStats (tc,tc,0)
+              writeTVar wCallBufferStats Nothing 
               return flushLimitMin
             else do
               return (flushLimitMin - delta)
 
 
 flushLimitMin :: Word64 
-flushLimitMin = 16 * 1000
+flushLimitMin = 16 *1000* 1000
 
 flushLimitMax :: Word64 
-flushLimitMax = 100 * 1000
+flushLimitMax = 100 * 1000 *1000
 
 
 ifOpen :: Comm -> STM a -> STM a
