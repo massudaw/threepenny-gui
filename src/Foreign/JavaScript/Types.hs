@@ -15,6 +15,7 @@ import           Data.Map                as Map
 import           Data.String
 import           Data.Text
 import           Data.Typeable
+import           Snap.Core                       (Cookie(..))
 import           System.IO                       (stderr)
 import           Data.Time
 
@@ -224,14 +225,14 @@ instance Show JavaScriptException where
 {-----------------------------------------------------------------------------
     Window & Event Loop
 ------------------------------------------------------------------------------}
-data Consistency  = Consistent | Inconsistent
-type Event        = (Coupon, JSON.Value, Consistency)
+-- | An event sent from the browser window to the server.
+type Event        = (Coupon, JSON.Value)
 
 -- | An event handler that can be passed to the JavaScript client.
 type HsEvent      = RemotePtr (JSON.Value -> IO ())
 
 quit :: Event
-quit = ("quit", JSON.Null, Consistent)
+quit = ("quit", JSON.Null)
 
 -- | Specification of how JavaScript functions should be called.
 data CallBufferMode
@@ -258,10 +259,17 @@ data CallBufferMode
     -- every 300ms.
 
 
+-- | Action that the server will run when a browser window connects.
+type EventLoop   = Server -> RequestInfo -> Comm -> IO ()
+type RequestInfo = [Cookie]
+
 -- | Representation of a browser window.
 data Window = Window
     { getServer      :: Server
-    -- ^ Server that tbe browser window communicates with.
+    -- ^ Server that the browser window communicates with.
+    , getCookies     :: [Cookie]
+    -- ^ Cookies that the browser window has sent to the server when connecting.
+
     , runEval        :: String -> IO ()
     , callEval       :: String -> IO JSON.Value
 
@@ -291,7 +299,7 @@ newPartialWindow = do
     b2  <- newTVarIO FlushOften
     b3  <- newEmptyTMVarIO
     let nop = const $ return ()
-    Window undefined nop undefined b1 b2 b3 (return ()) nop nop ptr <$> newVendor <*> newVendor
+    Window undefined [] nop undefined b1 b2 b3 (return ()) nop nop ptr <$> newVendor <*> newVendor
 
 -- | For the purpose of controlling garbage collection,
 -- every 'Window' as an associated 'RemotePtr' that is alive

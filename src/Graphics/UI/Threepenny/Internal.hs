@@ -21,7 +21,7 @@ module Graphics.UI.Threepenny.Internal (
     EventData, domEvent, unsafeFromJSON,
     ) where
 
-import           Control.Applicative                   (Applicative)
+import           Control.Applicative                   (Applicative(..))
 import           Control.Monad
 import           Control.Monad.Catch
 import           Control.Monad.Fix
@@ -221,7 +221,7 @@ mkElementNamespace namespace tag = do
 --
 -- This operation removes the element from the browser window DOM
 -- and marks it for garbage collection on the Haskell side.
--- The element is unuseable afterwards.
+-- The element is unusable afterwards.
 --
 -- NOTE: If you wish to temporarily remove an element from the DOM tree,
 -- change the 'children' property of its parent element instead.
@@ -288,11 +288,11 @@ instance Functor UI where
     fmap f = UI . fmap f . unUI
 
 instance Applicative UI where
-    pure  = return
+    pure  = UI . pure
     (<*>) = ap
 
 instance Monad UI where
-    return  = UI . return
+    return  = pure
     m >>= k = UI $ unUI m >>= unUI . k
 
 instance MonadIO UI where

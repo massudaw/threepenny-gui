@@ -1,5 +1,52 @@
 ## Changelog for the `threepenny-gui` package
 
+**0.8.3.1** – Maintenance release
+
+* Bump dependencies for compatibility with GHC-8.8.
+* Bump dependencies to allow `hashable` 1.3.0.0.
+* Remove support for GHC 7.6 and 7.8.
+
+**0.8.3.0** – Maintenance and snapshot release
+
+* Export `keypress` event.
+* Fix the spelling of the `refX` and `refY` SVG attributes.
+  `refX` and `refY` are added to `Graphics.UI.Threepenny.SVG.Attributes`,
+  the old lowercase versions are deprecated.
+* Invoke compatibility mode of IE11 for jQuery v3.2.1.
+* Compatibility with GHC-8.6.1
+
+**0.8.2.4** – Maintenance release
+
+* Remove redundant dependencies on `network-uri` and `network`
+* Bump dependencies to allow `aeson` 1.4.0.0
+* Exclude `websockets` 0.12.5.0 from dependencies.
+
+**0.8.2.3** – Maintenance release
+
+* Compatibility with GHC-8.4.1
+* Bump dependencies to allow `aeson` 1.3.0.0
+* Bump dependencies to allow `exceptions` 0.10.0
+* Bump dependencies to allow `snap-server` 1.1.0.0
+
+**0.8.2.2** – Maintenance release
+
+* Bump dependencies to allow `exceptions` 0.9.0
+
+**0.8.2.1** — Maintenance release
+
+* Bump dependencies to allow `async` 2.2
+* Fix a compatibility issue with Cabal-2.0
+
+**0.8.2.0** — Snapshot release
+
+* Add `getCookies` function that retrieves the cookies sent with the HTTP request when the browser window connects (to the websocket). [#137][]
+* Allow Electron process to be accessed from JavaScript FFI. [#200][] This means that Threepenny is now more useful when used with the [Electron][] framework, see [doc/electron.md](doc/electron.md) for more information on that.
+* Bump dependencies to allow `file-embed` 0.0.10.1
+
+  [#137]: https://github.com/HeinrichApfelmus/threepenny-gui/issues/137
+  [#200]: https://github.com/HeinrichApfelmus/threepenny-gui/issues/200
+  [electron]: https://electron.atom.io
+
 **0.8.1.0** — Snapshot release
 
 * Improve documentation and handling of call buffering (`CallBufferMode`). The default call buffer mode was documented incorrectly, it was  `BufferRun` and is now `FlushOften`. [#163][], [#191][], [#192][]

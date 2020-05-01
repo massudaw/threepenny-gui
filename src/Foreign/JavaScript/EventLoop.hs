@@ -48,8 +48,8 @@ type Result = Either String JSON.Value
 
 -- | Event loop for a browser window.
 -- Supports concurrent invocations of `runEval` and `callEval`.
-eventLoop :: (Window -> IO void) -> (Server -> Comm -> IO ())
-eventLoop init server comm = void $ do
+eventLoop :: (Window -> IO void) -> EventLoop
+eventLoop init server info comm = void $ do
     -- To support concurrent FFI calls, we need three threads.
     -- A fourth thread supports
     --
@@ -93,6 +93,7 @@ eventLoop init server comm = void $ do
 
     w0 <- newPartialWindow
     let w = w0 { getServer    = server
+               , getCookies   = info
                , runEval      = run  . RunEval
                , callEval     = call . CallEval
                , debug        = debug

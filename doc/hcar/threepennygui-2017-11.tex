@@ -1,15 +1,15 @@
 % threepennygui-Ht.tex
-\begin{hcarentry}{threepenny-gui}
+\begin{hcarentry}[updated]{threepenny-gui}
 \label{threepenny-gui}
-\report{Heinrich Apfelmus}%11/16
+\report{Heinrich Apfelmus}%05/17
 \status{active development}
 \makeheader
 
-Threepenny-gui is a framework for writing graphical user interfaces (GUI)
-that uses the web browser as a display. Features include:
+Threepenny-gui is a framework for writing graphical user interfaces (GUI) that
+uses the web browser as a display. Features include:
 
 \begin{compactitem}
-\item \emph{Easy installation.} Everyone has a reasonably modern web browser
+\item \emph{Easy installation.} Everyone has a modern web browser
   installed. Just install the library from Hackage and you are ready to go.
   The library is cross-platform.
 \item \emph{HTML} + \emph{JavaScript}. You have all capabilities of HTML at
@@ -25,41 +25,37 @@ that uses the web browser as a display. Features include:
   convenient and fall back to the traditional style when you hit an impasse.
 \end{compactitem}
 
-\subsubsection*{Current status}
-
-The project is alive and kicking, the latest release is version
-\verb`0.7.0.0`. You can download the library from Hackage and use it right
-away to write that cheap GUI you need for your project. Here a screenshot from
-the example code:
+You can download the library from Hackage or Stackage and use it right away to
+write that cheap GUI you need for your project. Here a screenshot from the
+example code:
 
 %**<img width=700 src="./chat.jpg">
 %*ignore
 \begin{center}
-\includegraphics[width=0.5\textwidth]{html/chat.jpg}
+\includegraphics[width=\columnwidth]{html/chat.jpg}
 \end{center}
 %*endignore
 
 For a collection of real world applications that use the library, have a look
 at the gallery on the homepage.
 
-Compared to the previous report, performance has been improved by reducing the communication from the browser to the server when creating new HTML DOM elements. Other than that, only minor changes have been made.
-In particular, the library has been updated to work with the current Haskell ecosystem.
+\subsubsection*{Status}
+
+The latest release is version \verb`0.8.2.0`. I would like to thank co-maintainer Simon Jakobi for his diligent and timely releases.
+
+Compared to the previous report, several small additions to the API have been made, the documentation has been improved, and compatibility with the latest GHC versions has been ensured. Moreover, I given a tutorial about the library on HaL 2017, and the slides are now available in the source repository.
 
 \subsubsection*{Future development}
 
-The library is still very much in flux, significant API changes are likely in future versions. Future goals include:
+The library is still in flux, API changes are likely in future versions.
 
-\begin{itemize}
-    \item Improve performance by batching FFI calls.
-        This has already been partially implemented,
-        but more library calls should be made batchable.
-    \item Integrate with \href{http://electron.atom.io/}{Electron}, a new framework for developing desktop applications with HTML and JavaScript.
-\end{itemize}
+In the future, I hope to improve the functional reactive programming (FRP) aspects of the framework, for instance by using the \verb`reactive-banana` library as a basis. \cref{reactive-banana}
 
 \FurtherReading
 \begin{compactitem}
 \item Project homepage: \url{http://wiki.haskell.org/Threepenny-gui}
-\item Example code: \url{https://github.com/HeinrichApfelmus/threepenny-gui/tree/master/samples#readme}
+\item Example code:
+  \url{https://github.com/HeinrichApfelmus/threepenny-gui/tree/master/samples#readme}
 \item Application gallery: \url{http://wiki.haskell.org/Threepenny-gui#Gallery}
 \end{compactitem}
 \end{hcarentry}
