@@ -6,10 +6,11 @@ module Graphics.UI.Threepenny.Core (
     -- * Server
     -- $server
     Config(..), defaultConfig, startGUI,
+    loadFile, loadDirectory,
 
     -- * UI monad
     -- $ui
-    UI,ui, runUI, askWindow, liftUILater,liftIOLater,
+    UI, ui, runUI, MonadUI(..), askWindow, liftIOLater, liftUILater,
     module Control.Monad.IO.Class,
     module Control.Monad.Fix,
 
@@ -51,7 +52,8 @@ module Graphics.UI.Threepenny.Core (
     JSFunction, ffi,event, runFunction, runFunctionDelayed, callFunction,ffiAttr,ffiAttrRead,ffiAttrWrite,ffiAttrCall,JS.emptyFunction,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
     ffiExport,
-
+    -- ** Internals
+    toJSObject, liftJSWindow,
     -- * Internal and oddball functions
     fromJQueryProp,
 
@@ -87,6 +89,11 @@ or have set the port number to @jsPort=Just 8023@.)
 
 The server is multithreaded.
 FFI calls can be made concurrently, but events are handled sequentially.
+
+FFI calls can be __buffered__,
+so in some circumstances, it may happen that you manipulate the browser window,
+but the effect is not immediately visible.
+See 'CallBufferMode' for more information.
 
 -}
 
@@ -443,7 +450,7 @@ fromJQueryProp name from to = mkReadWriteAttr get set
       get   el = fmap from $ callFunction $ ffi "$(%1).prop(%2)" el name
 
 -- | Turn a JavaScript object property @.prop = ...@ into an attribute.
-fromObjectProperty :: (FromJS a, ToJS a, FFI (JSFunction a)) => String -> Attr Element a
+fromObjectProperty :: (FromJS a, ToJS a) => String -> Attr Element a
 fromObjectProperty name = mkReadWriteAttr get set
     where
       set v el = runFunction $ ffi ("%1." ++ name ++ " = %2") el v

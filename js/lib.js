@@ -1,6 +1,6 @@
 /* *********************************************************************
   Threepenny - JavaScript library
-  
+
   Additional JavaScript functions that are available
   for Threepenny.
 ********************************************************************* */
@@ -43,6 +43,7 @@ Haskell.bind = function (el, eventType, code,fun) {
   } else {
     var bf = function(event) {
       fun(eval(code));
+
       return true;
     }
     $(el).bind(eventType, bf);
@@ -59,7 +60,7 @@ Haskell.unbind = function (el,eventType,ptr){
 /////////////////////////////////////////////////////////////////////
 // Canvas API additions.
 // See http://stackoverflow.com/a/9722502/403805 .
-CanvasRenderingContext2D.prototype.clear = 
+CanvasRenderingContext2D.prototype.clear =
   CanvasRenderingContext2D.prototype.clear || function (preserveTransform) {
     if (preserveTransform) {
       this.save();
@@ -68,7 +69,7 @@ CanvasRenderingContext2D.prototype.clear =
     this.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (preserveTransform) {
       this.restore();
-    }           
+    }
 };
 
 

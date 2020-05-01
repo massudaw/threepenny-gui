@@ -19,6 +19,7 @@ import Debug.Trace
 import GHC.Conc
 import GHC.Clock
 
+
 {-----------------------------------------------------------------------------
     Call Buffer
 ------------------------------------------------------------------------------}
@@ -189,4 +190,3 @@ newJSPtr w coupon h1 h2 = do
     bufferRunEvalMethod' w coupon (snockBuffer $ "Haskell.freeStablePtr('" ++ show coupon++ "')")
     modifyTVar (wCallBufferMap w) (\(k,v) -> (Set.delete coupon k ,v))
   return o
-

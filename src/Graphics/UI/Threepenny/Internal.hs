@@ -5,18 +5,20 @@ module Graphics.UI.Threepenny.Internal (
     -- 'UI' monad, integrating FRP and JavaScript FFI. garbage collection
 
     -- * Documentation
-    Window(..), disconnect,request,
-    startGUI,
 
-    UI, runUI, liftIOLater, askWindow,ui,
+    Window, disconnect, request,
+    startGUI, loadFile, loadDirectory,
     head_,body,
 
+    UI, ui ,runUI, MonadUI(..), liftIOLater, askWindow, liftJSWindow,
+
     FFI, FromJS, ToJS, JSFunction, JSObject, ffi,async,event,
+    FFI, FromJS, ToJS, JSFunction, JSObject, ffi,
     runFunction, runFunctionDelayed , callFunction,
     CallBufferMode(..), setCallBufferMode, flushCallBuffer,
     ffiExport, debug, timestamp,
 
-    Element(..), fromJSObject, getWindow,
+    Element(toJSObject), fromJSObject, getWindow,
     mkElementNamespace, mkElement, delete, appendChild,removeChild,replaceWith , clearChildren,forceElement,
 
     EventData, domEvent,domEventSafe,domEventClient,domEventAsync,domEventH, unsafeFromJSON,
@@ -24,7 +26,7 @@ module Graphics.UI.Threepenny.Internal (
 
 import Data.Time
 import Data.Unique
-import           Control.Applicative                   (Applicative)
+import           Control.Applicative                   (Applicative(..))
 import           Control.Monad
 import qualified Control.Monad.Trans.State.Strict as State
 import           Control.Monad.Catch
@@ -49,7 +51,7 @@ import System.IO.Unsafe
 import System.Mem (performGC)
 import Foreign.JavaScript hiding
     (runFunction,runFunctionDelayed, callFunction, setCallBufferMode, flushCallBuffer
-    ,debug, timestamp, Window)
+    ,debug, timestamp, Window, loadFile, loadDirectory)
 
 import Debug.Trace
 data Wrap f = forall a . Wrap (f a)
@@ -129,6 +131,17 @@ head_ = wHead <$> askWindow
 body :: UI Element
 body = wBody <$> askWindow
 
+-- | Begin to serve a local file with a given 'MimeType' under a relative URI.
+loadFile
+    :: String    -- ^ MIME type
+    -> FilePath  -- ^ Local path to the file
+    -> UI String -- ^ Relative URI under which this file is now accessible
+loadFile x y = liftJSWindow $ \w -> JS.loadFile (JS.getServer w) x y
+
+-- | Make a local directory available under a relative URI.
+loadDirectory :: FilePath -> UI String
+loadDirectory x = liftJSWindow $ \w -> JS.loadDirectory (JS.getServer w) x
+
 {-----------------------------------------------------------------------------
     Elements
 ------------------------------------------------------------------------------}
@@ -139,10 +152,10 @@ type Events = String -> IO (E.Event JSON.Value)
 type Children = Foreign.RemotePtr ()
 
 data Element = Element
-    { toJSObject  :: JS.JSObject -- corresponding JavaScript object
-    , elEvents    :: Events      -- FRP event mapping
-    , elChildren  :: Children    -- The children of this element
-    , elWindow    :: Window      -- Window in which the element was created
+    { toJSObject  :: JS.JSObject -- ^ Access to the primitive 'JS.JSObject' for roll-your-own foreign calls.
+    , elEvents    :: Events      -- ^ FRP event mapping
+    , elChildren  :: Children    -- ^ The children of this element
+    , elWindow    :: Window      -- ^ Window in which the element was created
     } deriving (Typeable)
 
 instance ToJS Element where
@@ -237,7 +250,6 @@ addEvents el Window{ jsWindow = w, wEvents = wEvents } = do
             bptr <- JS.unsafeCreateJSObject w $
                 ffi "Haskell.bind(%1,%2,'',%3)" el name handlerPtr
             return ()
-
 
     events <- E.newEventsNamed initializeEvent
 
@@ -345,6 +357,13 @@ mkElementNamespace namespace tag = do
         fromJSObject0 el window
 
 -- | Delete the given element.
+--
+-- This operation removes the element from the browser window DOM
+-- and marks it for garbage collection on the Haskell side.
+-- The element is unusable afterwards.
+--
+-- NOTE: If you wish to temporarily remove an element from the DOM tree,
+-- change the 'children' property of its parent element instead.
 delete :: Element -> UI ()
 delete el = liftJSWindow  (\w -> do
     JS.runFunction w $ ffi "$(%1).detach()" el
@@ -422,7 +441,15 @@ instance Monoid Finalizer where
 newtype UI a = UI { unUI :: Monad.RWST Window Finalizer () Dynamic a }
     deriving (Typeable)
 
+class (Monad m) => MonadUI m where
+    -- | Lift a computation from the 'UI' monad.
+    liftUI :: UI a -> m a
 
+instance MonadUI UI where
+    liftUI = id
+
+-- | Access to the primitive 'JS.Window' object,
+--   for roll-your-own JS foreign calls.
 liftJSWindow :: (JS.Window -> IO a) -> UI a
 liftJSWindow f = askWindow >>= liftIO . f . jsWindow
 
@@ -433,11 +460,11 @@ instance Functor UI where
     fmap f = UI . fmap f . unUI
 
 instance Applicative UI where
-    pure  = return
+    pure  = UI . pure
     (<*>) = ap
 
 instance Monad UI where
-    return  = UI . return
+    return  = pure
     m >>= k = UI $ unUI m >>= unUI . k
 
 instance MonadIO UI where
@@ -474,7 +501,7 @@ liftIOLater x = UI $ Monad.tell (Finalizer x)
 {-----------------------------------------------------------------------------
     FFI
 ------------------------------------------------------------------------------}
--- | Run the given JavaScript function and carry on. Doesn't block.
+-- | Run a JavaScript function, but do not wait for a result.
 --
 -- The client window uses JavaScript's @eval()@ function to run the code.
 --
@@ -503,7 +530,18 @@ flushCallBuffer = liftJSWindow $ \w -> JS.flushCallBuffer w
 -- | Export the given Haskell function so that it can be called
 -- from JavaScript code.
 --
--- FIXME: At the moment, the function is not garbage collected.
+-- NOTE: At the moment, the 'JSObject' representing the exported function
+-- will be referenced by the browser 'Window' in which it was created,
+-- preventing garbage collection until this browser 'Window' is disconnected.
+--
+-- This makes it possible to use it as an event handler on the JavaScript side,
+-- but it also means that the Haskell runtime has no way to detect
+-- early when it is no longer needed.
+--
+-- In contrast, if you use the function 'domEvent' to register an
+-- event handler to an 'Element',
+-- then the handler will be garbage collected
+-- as soon as the associated 'Element' is garbage collected.
 ffiExport :: JS.IsHandler a => a -> UI JSObject
 ffiExport fun = liftJSWindowDyn $ \w -> do
     handlerPtr <- liftIO$ JS.exportHandler w fun

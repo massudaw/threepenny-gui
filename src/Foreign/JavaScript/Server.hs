@@ -1,17 +1,20 @@
 {-# LANGUAGE RecordWildCards, OverloadedStrings #-}
 module Foreign.JavaScript.Server (
-    httpComm
+    httpComm, loadFile, loadDirectory,
     ) where
 
 -- import general libraries
+import           Control.Applicative
 import           Control.Concurrent
 import           Control.Concurrent.Async
 import           Control.Concurrent.STM     as STM
 import qualified Control.Exception          as E
 import           Control.Monad
+import           Control.Monad.IO.Class
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString.Char8      as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
+import qualified Data.Map                   as M
 import           Data.Text
 import qualified Safe                       as Safe
 import           System.Environment
@@ -23,7 +26,7 @@ import           Data.Aeson                             ((.=))
 import qualified Data.Aeson                    as JSON
 import qualified Network.WebSockets            as WS
 import qualified Network.WebSockets.Snap       as WS
-import           Snap.Core
+import           Snap.Core                     as Snap
 import qualified Snap.Http.Server              as Snap
 import           Snap.Util.FileServe
 import qualified Codec.Compression.Zlib as GZip
@@ -57,21 +60,23 @@ httpComm Config{..} worker = do
                $ Snap.setErrorLog  (Snap.ConfigIoLog jsLog)
                $ Snap.setAccessLog (Snap.ConfigIoLog jsLog)
                $ Snap.defaultConfig
-    print config
+    server <- Server <$> newMVar newFilepaths <*> newMVar newFilepaths <*> return jsLog
+
     Snap.httpServe config . route $
-        routeResources dictEnv jsCustomHTML jsStatic
-        ++ routeWebsockets dictEnv worker
+        routeResources server dictEnv jsCustomHTML jsStatic
+        ++ routeWebsockets server dictEnv worker
 
 -- | Route the communication between JavaScript and the server
-routeWebsockets :: Maybe String -> EventLoop  -> Routes
-routeWebsockets dict worker = [("websocket", response)]
+routeWebsockets :: Server -> Maybe String -> EventLoop  -> Routes
+routeWebsockets server dict worker = [("websocket", response)]
     where
     response = do
       requestInfo <- getRequest
       WS.runWebSocketsSnap $ \ws -> void $ do
         comm <- communicationFromWebSocket dict ws
-        worker requestInfo comm
+        worker requestInfo server comm
         -- error "Foreign.JavaScript: unreachable code path."
+
 
 -- | Create 'Comm' channel from WebSocket request.
 communicationFromWebSocket :: Maybe String -> WS.PendingConnection -> IO Comm
@@ -103,30 +108,27 @@ communicationFromWebSocket dict request = do
                     Just x   -> atomically $ STM.writeTQueue commIn x
                     Nothing  -> error $
                         "Foreign.JavaScript: Couldn't parse JSON input"
+
                         ++ show input)
 
-        isConnectionClosed  e = isJust (E.fromException e :: Maybe WS.ConnectionException)
+    -- block until the channel is closed
+    let sentry = atomically $ do
+            open <- STM.readTVar commOpen
+            when open retry
 
-    let manageConnection = do
-         withAsync sendData $ \_ -> do
-            Left e <- waitCatch =<< async readData
+    -- explicitly close the Comm chanenl
+    let commClose = atomically $ STM.writeTVar commOpen False
 
-            let all :: E.SomeException -> Maybe ()
-                all _ = Just ()
-            E.tryJust all $ WS.sendClose connection $ LBS.pack "close"
-            atomically $ do
-              STM.writeTVar   commOpen False
-              STM.writeTQueue commIn $
-                JSON.object [ "tag" .= ("Quit" :: Text) ] -- write Quit event
+    -- read/write data until an exception occurs or the channel is no longer open
+    forkFinally (sendData `race_` readData `race_` sentry) $ \_ -> void $ do
+        -- close the communication channel explicitly if that didn't happen yet
+        commClose
 
-        -- there is no point in rethrowing the exception, this thread is dead
-
-    thread <- forkFinally manageConnection
-        (\_ -> WS.sendClose connection $ LBS.pack "close")
-    -- FIXME: In principle, the thread could be killed *again*
-    -- while the `Comm` is being closed, preventing the `commIn` queue
-    -- from receiving the "Quit" message
-    let commClose = killThread thread
+        -- attempt to close websocket if still necessary/possible
+        -- ignore any exceptions that may happen if it's already closed
+        let all :: E.SomeException -> Maybe ()
+            all _ = Just ()
+        E.tryJust all $ WS.sendClose connection $ LBS.pack "close"
 
     return $ Comm {..}
 
@@ -135,12 +137,17 @@ communicationFromWebSocket dict request = do
 ------------------------------------------------------------------------------}
 type Routes = [(ByteString, Snap ())]
 
-routeResources :: Maybe String -> Maybe FilePath -> Maybe FilePath -> Routes
-routeResources dict customHTML staticDir =
+routeResources :: Server -> Maybe String -> Maybe FilePath -> Maybe FilePath -> Routes
+routeResources server dict customHTML staticDir =
   fixHandlers noExpires static ++
         fixHandlers noCache  [("/"            , root)
         ,("/haskell.js"  , writeTextMime (jsDriverCode  dict) "application/javascript")
+
         ,("/haskell.css" , writeTextMime cssDriverCode "text/css")
+        ,("/file/:name"                ,
+            withFilepath (sFiles server) (flip serveFileAs))
+        ,("/dir/:name"                 ,
+            withFilepath (sDirs  server) (\path _ -> serveDirectory path))
         ]
     where
     fixHandlers f routes = [(a,f b) | (a,b) <- routes]
@@ -158,3 +165,36 @@ routeResources dict customHTML staticDir =
 writeTextMime text mime = do
     modifyResponse (setHeader "Content-type" mime)
     writeText text
+
+-- | Extract  from a URI
+withFilepath :: MVar Filepaths -> (FilePath -> ByteString -> Snap a) -> Snap a
+withFilepath rDict cont = do
+    mName    <- getParam "name"
+    (_,dict) <- liftIO $ withMVar rDict return
+    case (\key -> M.lookup key dict) =<< mName of
+        Just (path,mimetype) -> cont path (BS.pack mimetype)
+        Nothing              -> error $ "File not loaded: " ++ show mName
+
+-- FIXME: Serving large files fails with the exception
+-- System.SendFile.Darwin: invalid argument (Socket is not connected)
+
+-- | Associate an URL to a FilePath
+newAssociation :: MVar Filepaths -> (FilePath, MimeType) -> IO String
+newAssociation rDict (path,mimetype) = do
+    (old, dict) <- takeMVar rDict
+    let new = old + 1; key = show new ++ takeFileName path
+    putMVar rDict $ (new, M.insert (BS.pack key) (path,mimetype) dict)
+    return key
+
+-- | Begin to serve a local file with a given 'MimeType' under a URI.
+loadFile :: Server -> MimeType -> FilePath -> IO String
+loadFile server mimetype path = do
+    key <- newAssociation (sFiles server) (path, mimetype)
+    return $ "/file/" ++ key
+
+-- | Begin to serve a local directory under a URI.
+loadDirectory :: Server -> FilePath -> IO String
+loadDirectory server path = do
+    key <- newAssociation (sDirs server) (path,"")
+    return $ "/dir/" ++ key
+

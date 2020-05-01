@@ -6,20 +6,25 @@ module Foreign.JavaScript (
     -- This module implements a web server that communicates with
     -- a web browser and allows you to execute arbitrary JavaScript code on it.
     --
-    -- Note: This module is used internally by the "Graphics.UI.Threepenny"
-    -- library, but the types are /not/ compatible.
+    -- NOTE: This module is used internally by the "Graphics.UI.Threepenny"
+    -- library, but the types are /not/ compatible directly
+    -- (although some escape hatches are provided).
     -- Use "Foreign.JavaScript" only if you want to roll your own
     -- interface to the web browser.
 
     -- * Server
-    serve, Config(..), defaultConfig,
-    Window,requestInfo , root,
+    serve, defaultConfig, Config(
+          jsPort, jsAddr
+        , jsCustomHTML, jsStatic, jsLog
+        , jsWindowReloadOnDisconnect, jsCallBufferMode),
+    Server, MimeType, URI, loadFile, loadDirectory,
+    Window,requestInfo , getServer, root,
 
     -- * JavaScript FFI
     JavaScriptException(..),JSCode(..),ToJS(..), FromJS, JSFunction(..),emptyFunction, JSObject,toCode,
-    FFI, ffi, runFunction, runFunctionDelayed, callFunction,
+    FFI, ffi, runFunction, runFunctionDelayed,callFunction,
     NewJSObject, unsafeCreateJSObject,
-    CallBufferMode(..), setCallBufferMode, flushCallBuffer, flushChildren, forceObject,
+    CallBufferMode(..), setCallBufferMode,  flushCallBuffer, flushChildren, forceObject,
     IsHandler, exportHandler, onDisconnect,
     debug, timestamp,addFinalizer
     ) where
@@ -28,8 +33,8 @@ import           Control.Concurrent.STM       as STM
 import           Control.Monad                           (unless)
 import qualified Data.Aeson                   as JSON
 import qualified Control.Exception as E
-import           Foreign.JavaScript.EventLoop
 import           Foreign.JavaScript.CallBuffer
+import           Foreign.JavaScript.EventLoop
 import           Foreign.JavaScript.Marshal
 import           Foreign.JavaScript.Server
 import           Foreign.JavaScript.Types
@@ -53,8 +58,10 @@ serve
     -> (Window -> IO ())-- ^ Initialization whenever a client connects.
     -> IO ()
 serve config init = httpComm config $ eventLoop $ \w -> do
+  setCallBufferMode w (jsCallBufferMode config)
+  runFunction w $
+        ffi "connection.setReloadOnDisconnect(%1)" $ jsWindowReloadOnDisconnect config
   init w
-  -- flushCallBuffer w   -- make sure that all `runEval` commands are executed
   return ()
 
 {-----------------------------------------------------------------------------
@@ -79,7 +86,6 @@ runFunctionDelayed :: Window -> JSObject -> JSFunction () -> IO ()
 runFunctionDelayed w js f = bufferRunEvalMethod w js =<< toCode f
 
 
-
 -- | Run a JavaScript function that creates a new object.
 -- Return a corresponding 'JSObject' without waiting for the browser
 -- to send a result.
@@ -101,6 +107,7 @@ callFunction w f = do
     case resultJS of
         Left  e -> E.throwIO $ JavaScriptException e
         Right x -> marshalResult f w x
+
 
 -- | Export a Haskell function as an event handler.
 --

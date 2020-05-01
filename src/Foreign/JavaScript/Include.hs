@@ -6,7 +6,6 @@ import           Data.FileEmbed      (makeRelativeToProject)
 import           Language.Haskell.TH
 import           System.IO
 
-
 include :: FilePath -> Q Exp
 include path = do
     path <- makeRelativeToProject path

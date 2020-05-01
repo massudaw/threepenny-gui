@@ -24,6 +24,7 @@ main = do
     startGUI defaultConfig
         { jsCustomHTML = Just "chat.html"
         , jsStatic     = Just static
+        , jsCallBufferMode = BufferAll
         } ( setup messages) (return 1)
 
 type Message = (UTCTime, String, String)
@@ -31,9 +32,8 @@ type Message = (UTCTime, String, String)
 setup :: Chan Message -> Window -> UI ()
 setup globalMsgs window = do
     msgs <- liftIO $ Chan.dupChan globalMsgs
-    setCallBufferMode  BufferAll
 
-    -- return window # set title "Chat"
+    return window # set title "Chat"
 
     (nickRef, nickname) <- mkNickname
     messageArea         <- mkMessageArea msgs nickRef
@@ -62,6 +62,7 @@ receiveMessages w msgs messageArea = do
         execDynamic $ runUI w $ do
           element messageArea #+ [mkMessage msg]
           UI.scrollToBottom messageArea
+          flushCallBuffer -- make sure that JavaScript functions are executed
 
 mkMessageArea :: Chan Message -> IORef String -> UI Element
 mkMessageArea msgs nickname = do

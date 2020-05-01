@@ -15,6 +15,7 @@
 Haskell.createWebSocket = function (url0, receive,pathname) {
   var that = {};
   var url  =  'ws' + url0.slice(4) + '/websocket' + pathname;
+  var optReloadOnDisconnect = false;
   var ws   = new WebSocket(url);
   var wsIn = 0
   var wsInDecompressed = 0
@@ -22,7 +23,7 @@ Haskell.createWebSocket = function (url0, receive,pathname) {
   var wsOutDecompressed = 0
   
   // Close WebSocket when the browser window is closed.
-  $(window).unload( function () {
+  $(window).on('unload', function () {
     ws.close();
   });
 
@@ -60,6 +61,7 @@ Haskell.createWebSocket = function (url0, receive,pathname) {
     };
     ws.onclose = function (e) {
       Haskell.log("WebSocket closed: %o", e);
+      if (optReloadOnDisconnect) { window.location.reload(true); }
     };
     ws.onerror = function (e) {
       Haskell.log("WebSocket error: %o", e);
@@ -73,6 +75,8 @@ Haskell.createWebSocket = function (url0, receive,pathname) {
   };
   // Close the connection
   that.close = function () { ws.send(compress("quit")); };
+  // Set option: Reload window when the websocket connection is broken?
+  that.setReloadOnDisconnect = function (b) { optReloadOnDisconnect = b };
   
   return that;
 };

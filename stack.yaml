@@ -1,0 +1,7 @@
+flags:
+  threepenny-gui:
+    buildexamples: true
+packages:
+- .
+extra-deps: []
+resolver: lts-11.7

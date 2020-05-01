@@ -11,9 +11,11 @@ import           Control.Applicative
 import           Control.Concurrent
 import           Control.Concurrent.Async
 import           Control.Concurrent.STM   as STM
+import           Control.DeepSeq                  (deepseq)
 import           Control.Exception        as E
 import           Control.Monad
 import qualified Data.Aeson               as JSON
+import qualified Data.ByteString.Char8    as BS
 import           Data.IORef
 import qualified Data.Text                as T
 import Data.List (intercalate)
@@ -55,8 +57,9 @@ joinBuffer = intercalate ";" . ($[])
 -- | Event loop for a browser window.
 -- Supports concurrent invocations of `runEval` and `callEval`.
 eventLoop :: (Window -> IO ())-> EventLoop
-eventLoop init cookie comm = do
+eventLoop init cookie server comm = do
     -- To support concurrent FFI calls, we make three threads.
+
     -- The thread `multiplexer` reads from the client and
     --   sorts the messages into the appropriate queue.
     events      <- newTQueueIO
@@ -80,11 +83,12 @@ eventLoop init cookie comm = do
           atomically $ ifOpen comm$ writeServer comm $ Debug s
 
     -- We also send a separate event when the client disconnects.
-    disconnect <- newTMVarIO $ return ()
-    let onDisconnect m = atomically $ takeTMVar disconnect >>= putTMVar disconnect . (>>m)
+    disconnect <- newTVarIO $ return ()
+    let onDisconnect m = atomically $ writeTVar disconnect m
 
     w0 <- newPartialWindow
     let w = w0 { runEval        = maybe (return ()) (run  . RunEval) . nonEmpty . joinBuffer
+               , getServer    = server
                , requestInfo = cookie
                , callEval       = (\ref -> call ref . CallEval. joinBuffer)
                , debug        = debug
@@ -112,8 +116,8 @@ eventLoop init cookie comm = do
                   Quit -> do
                     return (Just ())
             traverse (\_ -> do
-              m <- atomically $ tryTakeTMVar disconnect
-              maybe (putStrLn "No disconnect event ") id m
+              m <- atomically $ readTVar disconnect
+              m
               b <- atomically $ readTVar (commOpen comm)
               when b (commClose comm)) v
 
@@ -145,8 +149,8 @@ eventLoop init cookie comm = do
               (foldr1 race_ [multiplexer, handleEvents, handleCalls,flushTimeout])
               (do
                 putStrLn "Foreign.JavaScript: Browser window disconnected."
-                m <- atomically $ tryTakeTMVar disconnect
-                maybe (putStrLn "No disconnect event ") id m
+                m <- atomically $ readTVar disconnect
+                m
                 b <- atomically $ readTVar (commOpen comm)
                 when b (commClose comm))
     return ()

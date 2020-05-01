@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, DeriveDataTypeable #-}
 module Foreign.JavaScript.Types where
 
 import           Data.Word
@@ -15,6 +15,7 @@ import           Data.IORef
 import           Data.String
 import           Data.Text
 import           Data.Typeable
+import           Snap.Core                       (Cookie(..))
 import           System.IO                       (stderr)
 import qualified Data.Map as Map
 import qualified Data.IntSet as Set
@@ -26,9 +27,52 @@ import Data.Time
 import Foreign.RemotePtr
 
 {-----------------------------------------------------------------------------
-    Server Configuration
+    Server Configuration -- Static
 ------------------------------------------------------------------------------}
--- | Configuration of a "Foreign.JavaScript" server.
+-- NOTE: Unfortunately, Haddock currently does not create documentation for
+-- record fields when the constructor is not exported.
+-- That's why we copy & paste it in the documentation for the data type.
+{- | Static configuration for a "Foreign.JavaScript" server.
+
+This is a record type which has the following fields:
+
+* @jsPort :: Maybe Int@
+
+    Port number.
+    @Nothing@ means that the port number is read from the environment variable @PORT@.
+    Alternatively, port @8023@ is used if this variable is not set.
+
+* @jsAddr :: Maybe ByteString@
+
+    Bind address.
+    @Nothing@ means that the bind address is read from the environment variable @ADDR@.
+    Alternatively, address @127.0.0.1@ is used if this variable is not set.
+
+* @jsCustomHTML :: Maybe FilePath@
+
+    Custom HTML file to replace the default one.
+
+* @jsStatic :: Maybe FilePath@
+
+    Directory that is served under @/static@.
+
+* @jsLog :: ByteString -> IO ()@
+
+    Function to print a single log message.
+
+* @jsWindowReloadOnDisconnect :: Bool@
+
+    Reload the browser window if the connection to the server was dropped accidentally,
+    for instance because the computer was put to sleep and awoken again.
+
+* @jsCallBufferMode :: CallBufferMode@
+
+    The initial 'CallBufferMode' to use for 'runFunction'.
+    It can be changed at any time with 'setCallBufferMode'.
+
+(For reasons of forward compatibility, the constructor is not exported.)
+
+-}
 data Config = Config
     { jsPort       :: Maybe Int
         -- ^ Port number.
@@ -36,17 +80,11 @@ data Config = Config
         -- read from the environment variable @PORT@.
         -- Alternatively, port @8023@ is used if this variable is not set.
     , jsAddr       :: Maybe ByteString
-        -- ^ Bind address.
-        -- @Nothing@ means that the bind address is
-        -- read from the environment variable @ADDR@.
-        -- Alternatively, address @127.0.0.1@ is
-        -- used if this variable is not set.
     , jsCustomHTML :: Maybe FilePath
-        -- ^ Custom HTML file to replace the default one.
     , jsStatic     :: Maybe FilePath
-        -- ^ Directory that is served under @/static@.
     , jsLog        :: ByteString -> IO ()
-        -- ^ Print a single log message.
+    , jsWindowReloadOnDisconnect :: Bool
+    , jsCallBufferMode :: CallBufferMode
     }
 
 defaultPort :: Int
@@ -57,17 +95,43 @@ defaultAddr = "127.0.0.1"
 
 -- | Default configuration.
 --
--- Port from environment variable or @8023@,
--- listening on @localhost@, no custom HTML, no static directory,
--- logging to stderr.
+-- Port from environment variable or @8023@, listening on @localhost@,
+-- no custom HTML, no static directory,
+-- logging to stderr,
+-- do reload on disconnect,
+-- __buffer FFI calls__.
 defaultConfig :: Config
 defaultConfig = Config
     { jsPort       = Nothing
     , jsAddr       = Nothing
+    , jsWindowReloadOnDisconnect = True
     , jsCustomHTML = Nothing
     , jsStatic     = Nothing
     , jsLog        = BS.hPutStrLn stderr
+    , jsCallBufferMode = BufferAll 
     }
+
+{-----------------------------------------------------------------------------
+    Server Configuration -- Dynamic
+------------------------------------------------------------------------------}
+-- | URI type.
+--
+-- FIXME: Use the correct type from "Network.URI"
+type URI = String
+
+-- | MIME type.
+type MimeType = String
+
+-- | Representation of a "Foreign.JavaScript" server.
+--
+-- Can be used for dynamic configuration, e.g. serving additional files.
+data Server = Server
+    { sFiles :: MVar Filepaths
+    , sDirs  :: MVar Filepaths
+    , sLog   :: ByteString -> IO () -- function for logging
+    }
+type Filepaths = (Integer, Map.Map ByteString (FilePath, MimeType))
+newFilepaths = (0, Map.empty)
 
 {-----------------------------------------------------------------------------
     Communication channel
@@ -152,11 +216,20 @@ an exception will be thrown when we try to send one of those to the browser.
 
 However, we have to make sure that the exception is thrown
 in the thread that constructed the message, not in the thread that
-handles the actual communication with the client. That's why we use
-the function `Control.DeepSeq.force` to make sure that any exception
+handles the actual communication with the client.
+
+That's why we have to use the function
+`Control.DeepSeq.deepseq` to make sure that any exception
 is thrown before handing the message over to another thread.
 
+Since exceptions in pure code do not have a precise ordering relative
+to exceptions in IO code, evaluating the pure value
+also helps with ensuring that the exception is raised before
+any subsequent IO exception; this makes it easier to pinpoint
+the root cause for library users.
+
 -}
+
 
 data JavaScriptException = JavaScriptException String deriving Typeable
 
@@ -168,14 +241,14 @@ instance Show JavaScriptException where
 {-----------------------------------------------------------------------------
     Window & Event Loop
 ------------------------------------------------------------------------------}
-data Consistency  = Consistent | Inconsistent
-type Event        = (Coupon, JSON.Value, Consistency)
+-- | An event sent from the browser window to the server.
+type Event        = (Coupon, JSON.Value)
 
 -- | An event handler that can be passed to the JavaScript client.
 type HsEvent      = RemotePtr (JSON.Value -> IO ())
 
 quit :: Event
-quit = (-1, JSON.Null, Consistent)
+quit = (-1, JSON.Null)
 
 -- | Specification of how JavaScript functions should be called.
 --
@@ -223,20 +296,20 @@ findBM k = L.find ((Set.member k).fst)
 emptyBM :: BufferMap v
 emptyBM = []
 
-type EventLoop   = Request -> Comm -> IO ()
+type EventLoop   = Request -> Server -> Comm -> IO ()
 
 cookiesMap i = Map.fromList $ (\i -> (BS.unpack $ cookieName i , BS.unpack $cookieValue i) ) <$> rqCookies (requestInfo i)
 
 -- | Representation of a browser window.
 data Window = Window
     { requestInfo :: Request
+    , getServer   :: Server
     , runEval        :: CallBuffer -> STM ()
     , callEval       :: TMVar (Either String JSON.Value) -> CallBuffer -> STM ()
     , wCallBuffer     :: TVar CallBuffer
     , wCallBufferMap  :: TVar (Set , BufferMap (TVar CallBuffer))
     , wCallBufferMode :: TVar CallBufferMode
     , wCallBufferStats :: TVar (Word64,Word64,Int)
-
     , timestamp      :: IO ()
     -- ^ Print a timestamp and the time difference to the previous one
     -- in the JavaScript console.
@@ -249,6 +322,7 @@ data Window = Window
     , wJSObjects     :: Vendor JSPtr
     }
 
+
 newPartialWindow :: IO Window
 newPartialWindow = do
     t0 <- getMonotonicTimeNSec 
@@ -260,7 +334,7 @@ newPartialWindow = do
     let
       nop :: Monad m => b -> m ()
       nop = const $ return ()
-    Window undefined nop undefined b1 b1i b2 b3  (return ()) nop nop ptr <$> newVendor <*> newVendor
+    Window undefined undefined nop undefined b1 b1i b2 b3  (return ()) nop nop ptr <$> newVendor <*> newVendor
 
 -- | For the purpose of controlling garbage collection,
 -- every 'Window' as an associated 'RemotePtr' that is alive

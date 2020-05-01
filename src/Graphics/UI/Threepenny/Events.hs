@@ -6,9 +6,10 @@ module Graphics.UI.Threepenny.Events (
     onChangeE,valueChange, selectionChange, checkedChange,
 
     -- * Standard DOM events
-    click,dblclick, mousewheel,mousemove, mousedown, mouseup, hover, leave,
+    click,contextmenu, dblclick, mousewheel,mousemove, mousedown, mouseup,  
+    hover, leave,
     focus, blur,
-    KeyCode, keyup, keydown,keydownFilter
+    KeyCode, keyup, keydown, keydownFilter
     ) where
 
 import Graphics.UI.Threepenny.Attributes
@@ -54,13 +55,13 @@ click el = domEventH "click" el (ffi "")
 dblclick :: Element -> UI (Event ())
 dblclick el = domEventH "dblclick" el (ffi "")
 
+-- | Context menu event.
+contextmenu :: Element -> UI (Event (Int,Int))
+contextmenu el = domEventH "contextmenu"  el (coordinates el)
+
 -- | Mouse enters an element.
 hover :: Element -> UI (Event ())
 hover el = domEventH "mouseenter" el (ffi "")
-
--- | Mouse leaving an element.
-leave :: Element -> UI (Event ())
-leave el = domEventH "mouseleave" el (ffi "")
 
 
 -- | Event that periodically occurs while the mouse is moving over an element.
@@ -88,6 +89,10 @@ mousedown el = domEventH "mousedown" el (coordinates el)
 -- The mouse coordinates are relative to the element.
 mouseup :: Element -> UI (Event (Int,Int))
 mouseup el = domEventH "mouseup" el (coordinates el)
+
+-- | Mouse leaving an element.
+leave :: Element -> UI (Event ())
+leave el = domEventH "mouseleave" el  (ffi "")
 
 -- | Element receives focus.
 focus :: Element -> UI (Event ())
