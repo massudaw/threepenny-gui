@@ -27,6 +27,8 @@ import Foreign.JavaScript.CallBuffer
 import Foreign.JavaScript.Types
 import Debug.Trace
 import GHC.Conc
+import GHC.Clock
+import Data.Word
 
 rebug :: IO ()
 #ifdef REBUG
@@ -115,9 +117,7 @@ eventLoop init cookie comm = do
               b <- atomically $ readTVar (commOpen comm)
               when b (commClose comm)) v
 
-    let flushTimeout = forever $ do
-            i <- atomically $ flushDirtyBuffer comm w
-            threadDelay (i*1000)
+    let flushTimeout = flushBuffers w  
     -- Send FFI calls to client and collect results
     let handleCalls = forever $ do
             ref <- atomically $ do
@@ -184,26 +184,34 @@ fromJSStablePtr js w@(Window{..}) = do
         Nothing -> newJSPtr w coupon (JSPtr coupon) wJSObjects
 
 
-flushDirtyBuffer :: Comm -> Window -> STM Int
-flushDirtyBuffer comm w@Window{..} = do
+flushBuffers :: Window -> IO () 
+flushBuffers w = forever $ do
+    i <- atomically $ flushDirtyBuffer w 
+    threadDelay (fromIntegral i + 1)
+
+flushDirtyBuffer ::  Window -> STM Word64
+flushDirtyBuffer w@Window{..} = do
       (ti,tl,ix) <- readTVar wCallBufferStats
-      tc <- unsafeIOToSTM getCurrentTime
-      let delta = round $ diffUTCTime tc tl *1000
-          total = round $ diffUTCTime tl ti *1000
-      if delta > flush_limit_min || total > flush_limit_max
-        then do
-          flushCallBufferSTM w
-          return flush_limit_min
-        else do
-          writeTVar wCallBufferStats (ti,tl,ix)
-          return (flush_limit_min - delta)
+      if ix == 0 
+        then retry 
+        else  do
+          tc  <- unsafeIOToSTM getMonotonicTimeNSec 
+          let delta = tc - tl
+              total = tl - ti 
+          if delta > flushLimitMin || total > flushLimitMax 
+            then do
+              flushCallBufferSTM w
+              writeTVar wCallBufferStats (tc,tc,0)
+              return flushLimitMin
+            else do
+              return (flushLimitMin - delta)
 
 
-flush_limit_min :: Int
-flush_limit_min = 16
+flushLimitMin :: Word64 
+flushLimitMin = 16 * 1000
 
-flush_limit_max :: Int
-flush_limit_max = 100
+flushLimitMax :: Word64 
+flushLimitMax = 100 * 1000
 
 
 ifOpen :: Comm -> STM a -> STM a

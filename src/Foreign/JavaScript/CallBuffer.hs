@@ -11,19 +11,19 @@ import Data.List (any,intercalate)
 import Data.Monoid
 import Data.Maybe (isJust)
 import qualified Data.Map as M
-import qualified Data.Set as Set
+import qualified Data.IntSet as Set
 import qualified Data.Foldable as F
 import Control.Monad
 import Data.Time
 import Debug.Trace
 import GHC.Conc
+import GHC.Clock
 
 {-----------------------------------------------------------------------------
     Call Buffer
 ------------------------------------------------------------------------------}
 flushCallBuffer :: Window -> IO ()
 flushCallBuffer w = do 
-  putStrLn "Forcing buffer flush"
   atomically . flushCallBufferSTM $ w
 
 -- | Set the call buffering mode for the given browser window.
@@ -37,11 +37,15 @@ flushCallEvalBuffer :: Window -> TMVar Result -> STM ()
 flushCallEvalBuffer w@Window{..} ref = do
         code <- readTVar wCallBuffer
         writeTVar wCallBuffer  id
-        callEval ref  code
+        callEval ref code
         return ()
 
-
-
+flushCallBufferSTM :: Window -> STM ()
+flushCallBufferSTM w@Window{..} = do
+        code <- readTVar wCallBuffer
+        writeTVar wCallBuffer id
+        runEval  code
+        return ()
 
 -- Schedule a piece of JavaScript code to be run with `runEval`,
 -- depending on the buffering mode
@@ -169,7 +173,7 @@ bufferRunEval' w@Window{..} icode = do
       mode <- readTVar wCallBufferMode
       let buffer = do
               modifyTVar wCallBuffer (appendBuffer icode)
-              t0 <- unsafeIOToSTM getCurrentTime
+              t0 <- unsafeIOToSTM getMonotonicTimeNSec 
               modifyTVar wCallBufferStats (\(ti,tf,i) -> (ti,t0,i+1))
               return Nothing
       o <- case mode of
@@ -178,19 +182,6 @@ bufferRunEval' w@Window{..} icode = do
             i-> return $ Just icode
       traverse runEval o
       return ()
-
-tryModifyTMVar var f =  do
-  v <- tryTakeTMVar var
-  putTMVar var (f v)
-
-
-
-flushCallBufferSTM :: Window -> STM ()
-flushCallBufferSTM w@Window{..} = do
-        code <- readTVar wCallBuffer
-        writeTVar wCallBuffer id
-        runEval  code
-        return ()
 
 newJSPtr w coupon h1 h2 = do
   o <- newRemotePtr coupon  h1 h2

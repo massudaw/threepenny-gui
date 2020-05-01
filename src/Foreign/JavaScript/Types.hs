@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Foreign.JavaScript.Types where
 
+import           Data.Word
 import           Control.Applicative
 import qualified Control.Exception       as E
 import           Control.Concurrent.STM  as STM
@@ -16,9 +17,10 @@ import           Data.Text
 import           Data.Typeable
 import           System.IO                       (stderr)
 import qualified Data.Map as Map
-import qualified Data.Set as Set
+import qualified Data.IntSet as Set
 import qualified Data.List as L
 import Snap.Core
+import GHC.Clock
 
 import Data.Time
 import Foreign.RemotePtr
@@ -196,40 +198,44 @@ data CallBufferMode
 
 type CallBuffer = ([String] -> [String])
 
-type Set = Set.Set
+type Set = Set.IntSet
 
-type BufferMap k v = [(Set k, v)]
+type BufferMap v = [(Set,v)]
 
-insertSBM :: Ord k => Set k -> v -> BufferMap k v -> BufferMap k v
+insertSBM :: Set -> v -> BufferMap v -> BufferMap v
 insertSBM k v l = ( k ,v):l
 
-insertBM :: Ord k => k -> v -> BufferMap k v -> BufferMap k v
+insertBM :: Coupon  -> v -> BufferMap v -> BufferMap v
 insertBM k v l = (Set.singleton k ,v):l
 
+deleteBM :: Coupon -> BufferMap v -> BufferMap v
 deleteBM k l = L.deleteBy (\(i,_) (l,_) -> not $ Set.null $ Set.intersection i l ) (Set.singleton k,undefined) l
 
+moveAtBM :: Set -> Coupon -> BufferMap v -> BufferMap v
 moveAtBM at k  l = ins
-  where del = L.deleteBy (\(i,_) (l,_) -> not $ Set.null $ Set.intersection i l ) (Set.singleton k,undefined) l
-        Just (kdel ,_)= findBM k l
+  where del = deleteBM k l
+        Just (kdel ,_) = findBM k l
         ins = fmap (\(ko,l) -> if not $ Set.null $ Set.intersection ko at then (Set.union kdel ko ,l) else (ko,l)) del
 
-findBM :: Ord k => k -> BufferMap k v -> Maybe (Set k,v)
+findBM :: Coupon -> BufferMap v -> Maybe (Set,v)
 findBM k = L.find ((Set.member k).fst)
-emptyBM :: BufferMap k v
+
+emptyBM :: BufferMap v
 emptyBM = []
 
 type EventLoop   = Request -> Comm -> IO ()
 
 cookiesMap i = Map.fromList $ (\i -> (BS.unpack $ cookieName i , BS.unpack $cookieValue i) ) <$> rqCookies (requestInfo i)
+
 -- | Representation of a browser window.
 data Window = Window
     { requestInfo :: Request
     , runEval        :: CallBuffer -> STM ()
     , callEval       :: TMVar (Either String JSON.Value) -> CallBuffer -> STM ()
     , wCallBuffer     :: TVar CallBuffer
-    , wCallBufferMap  :: TVar (Set Coupon , BufferMap Coupon (TVar CallBuffer))
+    , wCallBufferMap  :: TVar (Set , BufferMap (TVar CallBuffer))
     , wCallBufferMode :: TVar CallBufferMode
-    , wCallBufferStats :: TVar (UTCTime,UTCTime,Int)
+    , wCallBufferStats :: TVar (Word64,Word64,Int)
 
     , timestamp      :: IO ()
     -- ^ Print a timestamp and the time difference to the previous one
@@ -245,7 +251,7 @@ data Window = Window
 
 newPartialWindow :: IO Window
 newPartialWindow = do
-    t0 <- getCurrentTime
+    t0 <- getMonotonicTimeNSec 
     ptr <- newRemotePtr (-1) () =<< newVendor
     b1  <- newTVarIO id
     b1i  <- newTVarIO (Set.empty ,[])
